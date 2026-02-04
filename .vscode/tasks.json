@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "GAS: Pull + Commit",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/gas_pull_commit.sh",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "GAS: Commit (if needed) + Push",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/gas_commit_push.sh",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}
+
