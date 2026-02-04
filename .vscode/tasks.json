@@ -20,6 +20,16 @@
         "reveal": "always",
         "panel": "dedicated"
       }
+    },
+    {
+      "label": "GitHub: Push origin",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/github_push.sh",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
     }
   ]
 }
