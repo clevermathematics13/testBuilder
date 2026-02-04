@@ -29,13 +29,17 @@ echo ""
 echo "➡️  git status"
 git status --porcelain
 
-if [[ -z "$(git status --porcelain)" ]]; then
-  echo "✅ No changes to commit."
-  exit 0
-fi
+# Only commit if GAS files changed (avoid auto-committing local tooling)
+CHANGES="$(git status --porcelain)"
+echo "$CHANGES"
 
-git add -A
-MSG="sync: pull $(date +"%Y-%m-%d %H:%M:%S")"
-git commit -m "$MSG"
-echo "✅ Committed: $MSG"
+if echo "$CHANGES" | grep -qE '^( M|M |A | 
+D|\?\?)\s+(appsscript\.json|.*\.js|.*\.gs|.*\.html)$'; then
+  git add appsscript.json *.js *.gs *.html 2>/dev/null || true
+  MSG="sync: pull $(date +"%Y-%m-%d %H:%M:%S")"
+  git commit -m "$MSG"
+  echo "✅ Committed: $MSG"
+else
+  echo "✅ No GAS source changes to commit."
+fi
 
