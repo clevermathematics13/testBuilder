@@ -83,20 +83,32 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     // Mark-tag line?
     const markInfo = msaDetectMarkTag_(line);
     if (markInfo) {
-      const requirement = msaTrimBlock_(buffer.join("\n"));
+      let requirement = msaTrimBlock_(buffer.join("\n"));
       buffer = [];
 
       const pt = {
         page: pageNum,
         part: part,
         branch: branch,
-        mark: markInfo.mark,          // e.g. "A1A1" or "M1"
+        mark: markInfo.mark, // e.g. "A1A1" or "M1"
         requirement: requirement,
         notes: [],
         source_line_index: i
       };
 
-      if (!requirement) {
+      // Post-process requirement to extract any leading/embedded note lines
+      const reqLines = (pt.requirement || "").split('\n');
+      const finalReqLines = [];
+      for (let k = 0; k < reqLines.length; k++) {
+        if (/^\s*(Note:|Accept|Award)\b/i.test(reqLines[k])) {
+          pt.notes.push(reqLines[k].trim());
+        } else {
+          finalReqLines.push(reqLines[k]);
+        }
+      }
+      pt.requirement = finalReqLines.join('\n').trim();
+
+      if (!pt.requirement) {
         warnings.push("Page " + pageNum + ": mark " + pt.mark + " had empty requirement context.");
       }
 

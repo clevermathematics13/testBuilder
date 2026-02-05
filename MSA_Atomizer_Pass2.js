@@ -146,20 +146,16 @@ function msaTrySplitDoubleMarkUsingNote_(point, ocrByPage) {
   p1.id = baseId + "_A";
   p2.id = baseId + "_B";
 
-  // Requirements become the split targets, but keep math context in `context`.
-  p1.requirement = "Award " + baseToken + " for: " + left;
-  p2.requirement = "Award " + baseToken + " for: " + right;
+  // Prepend the split text to the original requirement to preserve context.
+  const originalReq = (point.requirement || "").trim();
+  p1.requirement = "Award " + baseToken + " for: " + left + (originalReq ? "\n\n" + originalReq : "");
+  p2.requirement = "Award " + baseToken + " for: " + right + (originalReq ? "\n\n" + originalReq : "");
 
-  // Preserve original requirement in notes so nothing is lost.
+  // Add the split source to the notes array.
   p1.notes = (p1.notes || []).slice();
   p2.notes = (p2.notes || []).slice();
   p1.notes.push("Pass2 split source: " + awardLine);
   p2.notes.push("Pass2 split source: " + awardLine);
-
-  if (point.requirement) {
-    p1.notes.push("Original combined requirement:\n" + point.requirement);
-    p2.notes.push("Original combined requirement:\n" + point.requirement);
-  }
 
   return [p1, p2];
 }
