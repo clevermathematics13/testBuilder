@@ -73,15 +73,6 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     if (/^\s*OR\s*$/i.test(line))     { branch = "OR"; continue; }
     if (/^\s*THEN\s*$/i.test(line))   { branch = "THEN"; continue; }
 
-    // Notes attach to lastPoint
-    if (/^\s*(Note:|Accept|Award)\b/i.test(line)) {
-      if (lastPoint) {
-        lastPoint.notes = lastPoint.notes || [];
-        lastPoint.notes.push(line.trim());
-      }
-      continue;
-    }
-
     // Mark-tag line?
     const markInfo = msaDetectMarkTag_(line);
     if (markInfo) {

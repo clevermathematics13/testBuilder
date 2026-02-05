@@ -57,7 +57,7 @@ function msaWritePreviewArtifacts_(cfg, docId, folder, combined, pages) {
   try {
     var meta = msaGetDocMeta_(cfg, docId);
     var html = msaBuildPreviewHtml_(meta.title, docId, combined.json);
-    msaWriteTextFile_(folder, "markscheme_preview.html", html);
+    msaUpsertTextFile_(folder, "markscheme_preview.html", html);
   } catch (e) {
     msaWarn_("Failed to write preview HTML: " + e.message);
   }
