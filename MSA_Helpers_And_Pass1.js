@@ -18,16 +18,67 @@ function msaGetConfig_() {
 }
 
 function msaLoadGradingRules_(cfg) {
-  // Try to load from sheet, fallback to defaults
+  const defaults = msaDefaultRules_();
+  let source = "defaults";
+  let url = "";
+  let sheetRules = [];
+
   try {
     if (cfg.MSA_GRADING_RULES_SPREADSHEET_ID) {
-      // Logic to read sheet would go here. For now, returning defaults to ensure it runs.
-      // var ss = SpreadsheetApp.openById(cfg.MSA_GRADING_RULES_SPREADSHEET_ID);
+      const ss = SpreadsheetApp.openById(cfg.MSA_GRADING_RULES_SPREADSHEET_ID);
+      url = ss.getUrl();
+      const sheet = ss.getSheetByName(cfg.MSA_GRADING_RULES_SHEET_NAME);
+      if (sheet) {
+        const data = sheet.getDataRange().getValues();
+        const header = data[0].map(h => String(h || "").toLowerCase().trim());
+
+        const idxKey = header.indexOf("rule_key");
+        const idxEnabled = header.indexOf("enabled");
+        const idxPattern = header.indexOf("pattern");
+        const idxAction = header.indexOf("action");
+        const idxNotes = header.indexOf("notes");
+
+        if (idxPattern > -1 && idxAction > -1) {
+          for (let i = 1; i < data.length; i++) {
+            const row = data[i];
+            const isEnabled = (idxEnabled > -1) ? String(row[idxEnabled]).toLowerCase() === 'true' : true;
+            if (!isEnabled) continue;
+
+            sheetRules.push({
+              rule_key: idxKey > -1 ? row[idxKey] : "sheet_rule_" + i,
+              enabled: true,
+              pattern: row[idxPattern],
+              action: row[idxAction],
+              notes: idxNotes > -1 ? row[idxNotes] : ""
+            });
+          }
+          if (sheetRules.length > 0) {
+            source = "sheet";
+          }
+        }
+      }
     }
   } catch (e) {
-    msaWarn_("Could not load rules sheet: " + e.message);
+    msaWarn_("Could not load rules from sheet, falling back to defaults: " + e.message);
   }
-  return { rules: msaDefaultRules_(), source: "defaults", url: "" };
+
+  const finalRules = (source === "sheet" && sheetRules.length > 0) ? sheetRules : defaults;
+
+  // Pre-compile regexes for performance
+  finalRules.forEach(rule => {
+    try {
+      rule._re = new RegExp(rule.pattern, "i"); // Case-insensitive by default
+    } catch (e) {
+      msaWarn_(`Invalid regex for rule '${rule.rule_key}': ${rule.pattern}`);
+      rule.enabled = false; // Disable rule with bad regex
+    }
+  });
+
+  return {
+    rules: finalRules.filter(r => r.enabled),
+    source: source,
+    url: url
+  };
 }
 
 function msaGetDocMeta_(cfg, docId) {

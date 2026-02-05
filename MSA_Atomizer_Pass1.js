@@ -3,8 +3,6 @@
  ***********************/
 
 function msaAtomizePass1_(pagesOcr, rules, skipMapByPart) {
-  Logger.log("✅✅✅ RUNNING LATEST MSA_Atomizer_Pass1.js (v.NoteBleedFix) ✅✅✅");
-
   const warnings = [];
   const points = [];
 
@@ -124,23 +122,32 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
 function msaDetectMarkTag_(line) {
   const s = String(line || "").trim();
 
-  // Common forms: "A1A1", "A1 A1", "(M1)", "M1"
-  // Strict: line must be basically only marks + parentheses.
-  const compact = s.replace(/\s+/g, "");
+  // Handle simple cases first: (AG) or AG
+  if (/^\(?\s*AG\s*\)?$/.test(s)) {
+    return { mark: "AG" };
+  }
 
-  // (M1)
-  let m = compact.match(/^\(([AMR])(\d)\)$/);
-  if (m) return { mark: m[1] + m[2] };
+  // More complex marks like (M1), A1, A1A1, N2
+  // This regex looks for one or more mark tokens on a single line.
+  // e.g., "A1", "(M1)", "A1A1", "A1, M1"
+  const markTokens = s.match(/\b([AMRN]\d+)\b/g);
 
-  // A1 / M1 / R1
-  m = compact.match(/^([AMR])(\d)$/);
-  if (m) return { mark: m[1] + m[2] };
+  if (!markTokens) {
+    return null;
+  }
 
-  // A1A1 / A1A1A1 etc
-  m = compact.match(/^(([AMR]\d)+)$/);
-  if (m) return { mark: compact };
+  // If the line contains other text, it's not a mark tag line.
+  // This is a heuristic to avoid grabbing marks from inside requirement text.
+  // We create a "clean" version of the line with marks and punctuation removed.
+  const stripped = s.replace(/\b([AMRN]\d+)\b/g, "").replace(/[\(\),;]/g, "").trim();
+  if (stripped.length > 0) {
+    return null;
+  }
 
-  return null;
+  // Join multiple tokens found, e.g., ["A1", "M1"] -> "A1M1"
+  return {
+    mark: markTokens.join("")
+  };
 }
 
 function msaTrimBlock_(s) {
