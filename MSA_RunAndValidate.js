@@ -5,11 +5,11 @@
 function runMSA_VR_Batch() {
   msaLog_("=== MSA-VR (Validation & Repair) BATCH START ===");
 
-  // Put docIds you want to run here:
+  // 🟢 PUT THE DOC IDs YOU WANT TO TEST HERE:
   const docIds = [
-    "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88",
-    "1ogg4P9-_Q5-7GVgrtIbo355WjhYgoYs7Mjk0OOjO7Ho",
-    "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4"
+    "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88", // Example 1
+    "1ogg4P9-_Q5-7GVgrtIbo355WjhYgoYs7Mjk0OOjO7Ho", // Example 2
+    "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4"  // Example 3
   ];
 
   for (let i = 0; i < docIds.length; i++) {
@@ -44,28 +44,36 @@ function runMSA_VR_One(docId) {
 
   // OCR each page
   const ocrPages = [];
-  for (let p = 0; p < pages.length; p++) {
-    const page = pages[p];
-    const ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, {
-      formats: ["text", "latex_styled", "data"]
-    });
+  if (pages.length > 0) {
+    // Case A: Images found (Standard)
+    for (let p = 0; p < pages.length; p++) {
+      const page = pages[p];
+      const ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, {
+        formats: ["text", "latex_styled", "data"]
+      });
 
-    msaLog_(
-      "Page " + page.page +
-      " Mathpix: latex_styled length=" + ((ocr.latex_styled || "").length) +
-      ", text length=" + ((ocr.text || "").length)
-    );
+      msaLog_(
+        "Page " + page.page +
+        " Mathpix: latex_styled length=" + ((ocr.latex_styled || "").length) +
+        ", text length=" + ((ocr.text || "").length)
+      );
 
-    ocrPages.push({
-      page: page.page,
-      fileName: page.fileName,
-      fileId: page.fileId,
-      request_id: ocr.request_id || "",
-      confidence: typeof ocr.confidence === "number" ? ocr.confidence : null,
-      latex_styled: ocr.latex_styled || "",
-      text: ocr.text || "",
-      data: ocr.data || []
-    });
+      ocrPages.push({
+        page: page.page,
+        fileName: page.fileName,
+        fileId: page.fileId,
+        request_id: ocr.request_id || "",
+        confidence: typeof ocr.confidence === "number" ? ocr.confidence : null,
+        latex_styled: ocr.latex_styled || "",
+        text: ocr.text || "",
+        data: ocr.data || []
+      });
+    }
+  } else {
+    // Case B: No images found (Text-based Doc)
+    msaLog_("No images found. Extracting text directly from Google Doc body.");
+    const directPages = msaExtractTextFromDocDirectly_(docId);
+    directPages.forEach(p => ocrPages.push(p));
   }
 
   // Save combined OCR artifacts

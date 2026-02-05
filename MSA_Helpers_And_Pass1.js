@@ -61,8 +61,18 @@ function msaWriteJsonFile_(folder, filename, object) {
 }
 
 function msaWritePreviewArtifacts_(cfg, docId, folder, combined, pages) {
-  // Placeholder for preview generation
-  msaLog_("Preview artifacts generation skipped (placeholder).");
+  if (typeof msaBuildPreviewHtml_ !== 'function') {
+    msaLog_("msaBuildPreviewHtml_ not found (MSA_Preview.gs missing?). Skipping preview.");
+    return;
+  }
+
+  try {
+    var meta = msaGetDocMeta_(cfg, docId);
+    var html = msaBuildPreviewHtml_(meta.title, docId, combined.json);
+    msaWriteTextFile_(folder, "markscheme_preview.html", html);
+  } catch (e) {
+    msaWarn_("Failed to write preview HTML: " + e.message);
+  }
 }
 
 // --- IMAGES & OCR ---
@@ -109,4 +119,21 @@ function msaBuildCombinedOcr_(cfg, docId, folder, ocrPages) {
     readable: fullText,
     json: ocrPages
   };
+}
+
+function msaExtractTextFromDocDirectly_(docId) {
+  try {
+    var doc = DocumentApp.openById(docId);
+    var text = doc.getBody().getText();
+    return [{
+      page: 1,
+      text: text,
+      confidence: 1.0,
+      latex_styled: text, // Fallback
+      request_id: "direct_text_extraction"
+    }];
+  } catch (e) {
+    msaWarn_("Direct text extraction failed: " + e.message);
+    return [];
+  }
 }
