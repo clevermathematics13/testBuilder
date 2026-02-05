@@ -94,8 +94,10 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
       const finalReqLines = [];
       for (let k = 0; k < reqLines.length; k++) {
         if (/^\s*(Note:|Accept|Award)\b/i.test(reqLines[k])) {
+          Logger.log(">>> MOVING NOTE TO NOTES: " + reqLines[k]);
           pt.notes.push(reqLines[k].trim());
         } else {
+          Logger.log(">>> KEEPING IN REQ: " + reqLines[k]);
           finalReqLines.push(reqLines[k]);
         }
       }
