@@ -3,6 +3,8 @@
  ***********************/
 
 function msaAtomizePass1_(pagesOcr, rules, skipMapByPart) {
+  Logger.log("✅✅✅ RUNNING LATEST MSA_Atomizer_Pass1.js (v.NoteBleedFix) ✅✅✅");
+
   const warnings = [];
   const points = [];
 
