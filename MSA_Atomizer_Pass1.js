@@ -71,7 +71,7 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     // Branch markers
     if (/^\s*EITHER\s*$/i.test(line)) { branch = "EITHER"; buffer = []; continue; }
     if (/^\s*OR\s*$/i.test(line))     { branch = "OR";     buffer = []; continue; }
-    if (/^\s*THEN\s*$/i.test(line))   { branch = "THEN";   buffer = []; continue; }
+    if (/^\s*THEN\s*$/i.test(line))   { branch = "THEN";   continue; }
 
     // Mark-tag line?
     const markInfo = msaDetectMarkTag_(line);
@@ -93,9 +93,9 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
       const reqLines = (pt.requirement || "").split('\n');
       const finalReqLines = [];
       for (let k = 0; k < reqLines.length; k++) {
-        if (/^\s*(Note:|Accept|Award)/i.test(reqLines[k])) {          
+        if (/^\s*(Note:|Accept|Award)/i.test(reqLines[k])) {
           pt.notes.push(reqLines[k].trim());
-        } else {          
+        } else {
           finalReqLines.push(reqLines[k]);
         }
       }
