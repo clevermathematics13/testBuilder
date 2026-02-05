@@ -76,9 +76,18 @@ function runMSA_VR_One(docId) {
   // Validation baseline (found marks, stats, etc.)
   const validation = msaBuildValidationReport_(cfg, docId, folder, ocrPages);
 
+  // PREPARE OCR MAP for Atomizers (Pass 2 & 3 require line-by-line text per page)
+  const ocrByPage = {};
+  ocrPages.forEach(p => { ocrByPage[p.page] = (p.text || "").split(/\r?\n/); });
+
   // PASS 1: primary extraction
-  const pass1 = msaAtomizePass1_(docId, cfg, ocrPages);
-  msaWriteJsonFile_(folder, "markscheme_points_pass1.json", pass1.json);
+  // Call the robust Pass 1 (requires rules and null for skipMap)
+  const rawPass1 = msaAtomizePass1_(ocrPages, rules.rules, null);
+  const pass1 = {
+    json: rawPass1,
+    readable: JSON.stringify(rawPass1.points, null, 2)
+  };
+  msaWriteJsonFile_(folder, "markscheme_points_pass1.json", rawPass1);
   msaWriteTextFile_(folder, "markscheme_points_pass1_readable.txt", pass1.readable);
 
   // Decide if Pass2 should run
@@ -92,10 +101,14 @@ function runMSA_VR_One(docId) {
       " structure=" + pass1Score.structure.toFixed(2)
     );
 
-    // ✅ FIX: call the actual function name that exists in MSA_Atomizer_Pass2.gs
-    pass2 = msaAtomizerPass2_(pass1, cfg);
+    // Pass 2 takes the RAW json object, not the wrapper
+    const rawPass2 = msaAtomizerPass2_(pass1.json, ocrByPage);
+    pass2 = {
+      json: rawPass2,
+      readable: JSON.stringify(rawPass2.points, null, 2)
+    };
 
-    msaWriteJsonFile_(folder, "markscheme_points_pass2.json", pass2.json);
+    msaWriteJsonFile_(folder, "markscheme_points_pass2.json", rawPass2);
     msaWriteTextFile_(folder, "markscheme_points_pass2_readable.txt", pass2.readable);
   } else {
     msaLog_(
@@ -108,10 +121,14 @@ function runMSA_VR_One(docId) {
   // Winner candidate is pass2 if it exists; otherwise pass1.
   const candidate = pass2 ? pass2 : pass1;
 
-  // ✅ FIX: call the actual function name that exists in MSA_Atomizer_Pass3.gs
-  const pass3 = msaAtomizerPass3_(candidate, cfg);
+  // Pass 3 takes the RAW json object
+  const rawPass3 = msaAtomizerPass3_(candidate.json, ocrByPage);
+  const pass3 = {
+    json: rawPass3,
+    readable: JSON.stringify(rawPass3.points, null, 2)
+  };
 
-  msaWriteJsonFile_(folder, "markscheme_points_pass3.json", pass3.json);
+  msaWriteJsonFile_(folder, "markscheme_points_pass3.json", rawPass3);
   msaWriteTextFile_(folder, "markscheme_points_pass3_readable.txt", pass3.readable);
 
   // Choose BEST output (pass1 vs pass2 vs pass3)
