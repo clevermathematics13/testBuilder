@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Sync: GAS Pull+Commit → GitHub Push",
+      "label": "Sync: GAS Pull+Commit > GitHub Push",
       "type": "shell",
       "command": 
 "${workspaceFolder}/scripts/gas_pull_commit_and_github_push.sh",
@@ -36,6 +36,16 @@
       "label": "GitHub: Push origin",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/github_push.sh",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Project: Generate PROJECT_OVERVIEW.md",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/project_overview_audit.sh",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
