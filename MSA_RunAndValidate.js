@@ -78,8 +78,8 @@ function runMSA_VR_One(docId) {
 
   // Save combined OCR artifacts
   const combined = msaBuildCombinedOcr_(cfg, docId, folder, ocrPages);
-  msaWriteTextFile_(folder, "markscheme_ocr_combined.txt", combined.readable);
-  msaWriteJsonFile_(folder, "markscheme_ocr_combined.json", combined.json);
+  msaUpsertTextFile_(folder, "markscheme_ocr_combined.txt", combined.readable);
+  msaUpsertJsonFile_(folder, "markscheme_ocr_combined.json", combined.json);
 
   // Validation baseline (found marks, stats, etc.)
   const validation = msaBuildValidationReport_(cfg, docId, folder, ocrPages);
@@ -95,8 +95,8 @@ function runMSA_VR_One(docId) {
     json: rawPass1,
     readable: JSON.stringify(rawPass1.points, null, 2)
   };
-  msaWriteJsonFile_(folder, "markscheme_points_pass1.json", rawPass1);
-  msaWriteTextFile_(folder, "markscheme_points_pass1_readable.txt", pass1.readable);
+  msaUpsertJsonFile_(folder, "markscheme_points_pass1.json", rawPass1);
+  msaUpsertTextFile_(folder, "markscheme_points_pass1_readable.txt", pass1.readable);
 
   // Decide if Pass2 should run
   const pass1Score = msaScorePointsOutput_(pass1.json, validation, cfg);
@@ -116,8 +116,8 @@ function runMSA_VR_One(docId) {
       readable: JSON.stringify(rawPass2.points, null, 2)
     };
 
-    msaWriteJsonFile_(folder, "markscheme_points_pass2.json", rawPass2);
-    msaWriteTextFile_(folder, "markscheme_points_pass2_readable.txt", pass2.readable);
+    msaUpsertJsonFile_(folder, "markscheme_points_pass2.json", rawPass2);
+    msaUpsertTextFile_(folder, "markscheme_points_pass2_readable.txt", pass2.readable);
   } else {
     msaLog_(
       "Pass2 not triggered. coverage=" + pass1Score.coverage.toFixed(2) +
@@ -136,15 +136,15 @@ function runMSA_VR_One(docId) {
     readable: JSON.stringify(rawPass3.points, null, 2)
   };
 
-  msaWriteJsonFile_(folder, "markscheme_points_pass3.json", rawPass3);
-  msaWriteTextFile_(folder, "markscheme_points_pass3_readable.txt", pass3.readable);
+  msaUpsertJsonFile_(folder, "markscheme_points_pass3.json", rawPass3);
+  msaUpsertTextFile_(folder, "markscheme_points_pass3_readable.txt", pass3.readable);
 
   // Choose BEST output (pass1 vs pass2 vs pass3)
   const best = msaPickBestOutput_(pass1, pass2, pass3, validation, cfg);
 
   // Always write best to a single stable filename for downstream grading
-  msaWriteJsonFile_(folder, "markscheme_points_best.json", best.best.json);
-  msaWriteTextFile_(folder, "markscheme_points_best_readable.txt", best.best.readable);
+  msaUpsertJsonFile_(folder, "markscheme_points_best.json", best.best.json);
+  msaUpsertTextFile_(folder, "markscheme_points_best_readable.txt", best.best.readable);
 
   // Final validation report includes best decision info
   validation.best_pass = best.bestPass;
@@ -153,8 +153,8 @@ function runMSA_VR_One(docId) {
   if (best.metrics.pass2) validation.pass2 = best.metrics.pass2;
   if (best.metrics.pass3) validation.pass3 = best.metrics.pass3;
 
-  msaWriteTextFile_(folder, "markscheme_validation_report.txt", msaFormatValidationReport_(validation));
-  msaWriteJsonFile_(folder, "markscheme_validation_report.json", validation);
+  msaUpsertTextFile_(folder, "markscheme_validation_report.txt", msaFormatValidationReport_(validation));
+  msaUpsertJsonFile_(folder, "markscheme_validation_report.json", validation);
 
   // Preview artifacts (HTML + PNG copy of page 1 for quick Drive viewing)
   msaWritePreviewArtifacts_(cfg, docId, folder, combined, pages);

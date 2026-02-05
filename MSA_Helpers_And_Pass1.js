@@ -48,18 +48,6 @@ function msaGetOrCreateQuestionFolder_(cfg, docId) {
   return parent.createFolder(name);
 }
 
-function msaWriteTextFile_(folder, filename, content) {
-  var files = folder.getFilesByName(filename);
-  while (files.hasNext()) files.next().setTrashed(true);
-  folder.createFile(filename, content, MimeType.PLAIN_TEXT);
-}
-
-function msaWriteJsonFile_(folder, filename, object) {
-  var files = folder.getFilesByName(filename);
-  while (files.hasNext()) files.next().setTrashed(true);
-  folder.createFile(filename, JSON.stringify(object, null, 2), MimeType.PLAIN_TEXT);
-}
-
 function msaWritePreviewArtifacts_(cfg, docId, folder, combined, pages) {
   if (typeof msaBuildPreviewHtml_ !== 'function') {
     msaLog_("msaBuildPreviewHtml_ not found (MSA_Preview.gs missing?). Skipping preview.");
