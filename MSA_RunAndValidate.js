@@ -175,7 +175,11 @@ function runMSA_VR_One(docId) {
  * ========================================================= */
 
 function msaShouldTriggerPass2_(pointsJson, score, validation, cfg) {
+  // Check if any points look like "A1A1" (double marks)
+  const hasDoubleMarks = (pointsJson.points || []).some(p => /^([A-Z]\d+)\1$/i.test(p.mark || ""));
+
   const trigger = (
+    hasDoubleMarks || // 🟢 Force trigger if A1A1 is found
     (score.coverage < cfg.MSA_PASS2_COVERAGE_TRIGGER) ||
     (score.structure < cfg.MSA_PASS2_STRUCTURE_TRIGGER) ||
     (score.duplicateReqRatio > cfg.MSA_PASS2_DUP_REQ_TRIGGER) ||
@@ -184,7 +188,7 @@ function msaShouldTriggerPass2_(pointsJson, score, validation, cfg) {
 
   return {
     trigger: trigger,
-    reason: trigger ? "threshold" : "ok"
+    reason: hasDoubleMarks ? "double_marks_detected" : (trigger ? "threshold" : "ok")
   };
 }
 
