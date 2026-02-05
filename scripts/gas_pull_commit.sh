@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run from the repo root
+# Run from repo root
 cd "$(dirname "$0")/.."
 
 # Guardrails
@@ -29,17 +29,31 @@ echo ""
 echo "➡️  git status"
 git status --porcelain
 
-# Only commit if GAS files changed (avoid auto-committing local tooling)
-CHANGES="$(git status --porcelain)"
-echo "$CHANGES"
+# Stage ONLY GAS source files (handles spaces + deletions safely)
+STAGED_ANY=0
+while IFS= read -r -d '' f; do
+  STAGED_ANY=1
+  git add -A -- "$f"
+done < <(
+  {
+    git ls-files -z -- '*.js' '*.gs' '*.html' 'appsscript.json'
+    git ls-files -z --others --exclude-standard -- '*.js' '*.gs' '*.html' 
+'appsscript.json'
+  }
+)
 
-if echo "$CHANGES" | grep -qE '^( M|M |A | 
-D|\?\?)\s+(appsscript\.json|.*\.js|.*\.gs|.*\.html)$'; then
-  git add appsscript.json *.js *.gs *.html 2>/dev/null || true
-  MSG="sync: pull $(date +"%Y-%m-%d %H:%M:%S")"
-  git commit -m "$MSG"
-  echo "✅ Committed: $MSG"
-else
-  echo "✅ No GAS source changes to commit."
+if [[ "$STAGED_ANY" -eq 0 ]]; then
+  echo "✅ No GAS source files found to stage."
+  exit 0
 fi
+
+# If nothing got staged, don't commit
+if git diff --cached --quiet; then
+  echo "✅ No GAS source changes to commit."
+  exit 0
+fi
+
+MSG="sync: pull $(date +"%Y-%m-%d %H:%M:%S")"
+git commit -m "$MSG"
+echo "✅ Committed: $MSG"
 
