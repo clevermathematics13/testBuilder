@@ -93,7 +93,7 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
       const reqLines = (pt.requirement || "").split('\n');
       const finalReqLines = [];
       for (let k = 0; k < reqLines.length; k++) {
-        if (/^\s*(Note:|Accept|Award)\b/i.test(reqLines[k])) {
+        if (/^\s*(Note:|Accept|Award)/i.test(reqLines[k])) {
           Logger.log(">>> MOVING NOTE TO NOTES: " + reqLines[k]);
           pt.notes.push(reqLines[k].trim());
         } else {
