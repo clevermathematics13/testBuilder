@@ -95,39 +95,42 @@ function msaTrySplitDoubleMarkUsingNote_(point, ocrByPage) {
 
   var idx = msaSafeLineIndex_(point, lines);
 
-  // scan forward a bit for relevant "Award A1 ... and A1 ..." note
+  // Scan for the CLOSEST relevant "Award A1 ... and A1 ..." note in a window.
   var windowStart = Math.max(0, idx);
   var windowEnd = Math.min(lines.length, idx + 20);
 
-  var awardLine = null;
+  var bestMatch = null;
+
   for (var j = windowStart; j < windowEnd; j++) {
     var l = String(lines[j] || "").trim();
     if (!l) continue;
-    if (/awardA1/i.test(l.replace(/\s+/g, ""))) {
-      awardLine = l;
-      break;
-    }
+
     if (/Award\s+A1/i.test(l)) {
-      awardLine = l;
-      break;
+      // Try patterns like:
+      // "Award A1 for a correct numerator and A1 for a correct denominator"
+      // "Award A1 for a correct first term... and A1 for a correct second term..."
+      var re = /Award\s+A1\s+for\s+(?:a\s+)?correct\s+(.+?)\s+and\s+A1\s+for\s+(?:a\s+)?correct\s+(.+?)(?:\.$|$)/i;
+      var m = l.match(re);
+
+      if (!m) {
+        // Sometimes OCR drops "correct" twice, try a looser parse:
+        var re2 = /Award\s+A1\s+for\s+(.+?)\s+and\s+A1\s+for\s+(.+?)(?:\.$|$)/i;
+        m = l.match(re2);
+      }
+
+      if (m) {
+        // It's a valid split line. Is it the closest one so far?
+        const distance = Math.abs(j - idx);
+        if (!bestMatch || distance < bestMatch.distance) {
+          bestMatch = { line: l, match: m, distance: distance };
+        }
+      }
     }
   }
 
-  if (!awardLine) return null;
-
-  // Try patterns like:
-  // "Award A1 for a correct numerator and A1 for a correct denominator"
-  // "Award A1 for a correct first term in the numerator and A1 for a correct second term in the numerator"
-  var re = /Award\s+A1\s+for\s+(?:a\s+)?correct\s+(.+?)\s+and\s+A1\s+for\s+(?:a\s+)?correct\s+(.+?)(?:\.$|$)/i;
-  var m = awardLine.match(re);
-
-  if (!m) {
-    // Sometimes OCR drops "correct" twice, try a looser parse:
-    var re2 = /Award\s+A1\s+for\s+(.+?)\s+and\s+A1\s+for\s+(.+?)(?:\.$|$)/i;
-    m = awardLine.match(re2);
-  }
-
-  if (!m) return null;
+  if (!bestMatch) return null;
+  var awardLine = bestMatch.line;
+  var m = bestMatch.match;
 
   var left = msaCleanSplitText_(m[1]);
   var right = msaCleanSplitText_(m[2]);
