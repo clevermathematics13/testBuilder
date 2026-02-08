@@ -103,5 +103,30 @@ function testAtomizerPasses() {
   msaLog_("✅ Test Case 4 Passed");
 
 
+  // --- Test Case 5: Real-world complex case from 18M.1.SL.TZ2.S_5 ---
+  var mockOcr_RealWorld = [{
+    page: 1,
+    text: "(a)\n\nA2 N2\n\n[2 marks]\n(b) recognizing horizontal shift/translation of 1 unit\n\n(M1)\n\neg \\quad b=1 , moved 1 right\n\n(M1)\n\nrecognizing vertical stretch/dilation with scale factor 2\n\n(M1)\n\neg \\quad a=2, y \\times(-2)\n\\[\na=-2, b=-1\n\\]\n\nA1A1\nN2N2\n[4 marks]\n[Total: 6 marks]"
+  }];
+  var ocrByPage_RealWorld = { "1": mockOcr_RealWorld[0].text.split('\n') };
+
+  // Pass 1 should find 6 points, some of which are compound
+  var pass1_real = msaAtomizePass1_(mockOcr_RealWorld, mockRules, null);
+  assert_(pass1_real.points.length === 6, "Test 5, Pass 1: Should find 6 points initially.");
+  assert_(pass1_real.points.some(p => p.mark === 'A2N2'), "Test 5, Pass 1: Should find A2N2 compound mark.");
+  assert_(pass1_real.points.some(p => p.mark === 'A1A1'), "Test 5, Pass 1: Should find A1A1 compound mark.");
+  assert_(pass1_real.points.some(p => p.mark === 'N2N2'), "Test 5, Pass 1: Should find N2N2 compound mark.");
+
+  // Pass 2 should split the compound marks, resulting in 9 total points
+  var pass2_real = msaAtomizerPass2_(pass1_real, ocrByPage_RealWorld);
+  assert_(pass2_real.points.length === 9, "Test 5, Pass 2: Should split to 9 total points.");
+  const pass2_marks = pass2_real.points.map(p => p.mark);
+  const countOf = (arr, val) => arr.reduce((a, v) => (v === val ? a + 1 : a), 0);
+  assert_(countOf(pass2_marks, 'A2') === 1, "Test 5, Pass 2: Should have one A2 mark.");
+  assert_(countOf(pass2_marks, 'N2') === 3, "Test 5, Pass 2: Should have three N2 marks (1 from A2N2, 2 from N2N2).");
+  assert_(countOf(pass2_marks, 'A1') === 2, "Test 5, Pass 2: Should have two A1 marks.");
+  assert_(countOf(pass2_marks, 'M1') === 3, "Test 5, Pass 2: Should have three M1 marks.");
+  msaLog_("✅ Test Case 5 Passed");
+
   msaLog_("=== All Atomizer Unit Tests Passed! ✅ ===");
 }
