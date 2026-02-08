@@ -93,22 +93,22 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
         source_line_index: i
       };
 
-      // Post-process the requirement to extract any leading note lines.
-      // This prevents "Note:" text from being part of the core requirement.
-      const reqLines = (pt.requirement || "").split('\n');
-      const finalReqLines = [];
-      let isStrippingNotes = true;
-      for (let k = 0; k < reqLines.length; k++) {
-        const currentLine = reqLines[k];
-        // Only strip a contiguous block of notes from the beginning.
-        if (isStrippingNotes && /^\s*(Note:|Accept|Award)/i.test(currentLine)) {
-          pt.notes.push(currentLine.trim());
-        } else {
-          isStrippingNotes = false; // Stop stripping after the first non-note line.
-          finalReqLines.push(currentLine);
-        }
-      }
-      pt.requirement = finalReqLines.join('\n').trim();
+      // // Post-process the requirement to extract any leading note lines.
+      // // This prevents "Note:" text from being part of the core requirement.
+      // const reqLines = (pt.requirement || "").split('\n');
+      // const finalReqLines = [];
+      // let isStrippingNotes = true;
+      // for (let k = 0; k < reqLines.length; k++) {
+      //   const currentLine = reqLines[k];
+      //   // Only strip a contiguous block of notes from the beginning.
+      //   if (isStrippingNotes && /^\s*(Note:|Accept|Award)/i.test(currentLine)) {
+      //     pt.notes.push(currentLine.trim());
+      //   } else {
+      //     isStrippingNotes = false; // Stop stripping after the first non-note line.
+      //     finalReqLines.push(currentLine);
+      //   }
+      // }
+      // pt.requirement = finalReqLines.join('\n').trim();
 
       if (!pt.requirement) {
         warnings.push("Page " + pageNum + ": mark " + pt.mark + " had empty requirement context.");

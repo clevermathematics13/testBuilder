@@ -8,8 +8,9 @@ function runMSA_VR_Batch() {
   // 🟢 PUT THE DOC IDs YOU WANT TO TEST HERE:
   const docIds = [
     "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88", // Example 1
-    "1ogg4P9-_Q5-7GVgrtIbo355WjhYgoYs7Mjk0OOjO7Ho", // Example 2
-    "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4"  // Example 3
+    "1ogg4P9-_Q5-7GVgrtIbo355WjhYgoYs7Mjk0OOjO7Ho", // 22M.2.AHL.TZ2.H_7
+    "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4",  // Example 3
+    "17VFlp49U15wcbOoSP7wNUdraz3TjElwYwyvavLErec8" // 22M.2.AHL.TZ2.H_6
   ];
 
   for (let i = 0; i < docIds.length; i++) {

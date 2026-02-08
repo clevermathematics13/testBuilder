@@ -52,6 +52,18 @@
         "panel": "dedicated"
       }
     }
+{
+  "label": "GAS: Pull + Commit + Push",
+  "type": "shell",
+  "command": "${workspaceFolder}/scripts/gas_pull_commit_push.sh",
+  "problemMatcher": [],
+  "presentation": {
+    "reveal": "always",
+    "panel": "dedicated",
+    "clear": true
+  }
+}
+
   ]
 }
 
