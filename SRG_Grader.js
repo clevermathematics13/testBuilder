@@ -139,43 +139,6 @@ function srgFindQuestionFolderByDocId_(cfg, questionDocId) {
 }
 
 /**
- * Calculates the total possible score from a list of markscheme points,
- * correctly handling alternative METHOD branches.
- * @param {Array<Object>} points The array of points from markscheme_points_best.json.
- * @returns {number} The total possible score.
- */
-function srgCalculateTotalPossibleScore_(points) {
-  const byPart = {};
-  points.forEach(p => {
-    const part = p.part || 'unknown';
-    if (!byPart[part]) byPart[part] = [];
-    byPart[part].push(p);
-  });
-
-  let totalScore = 0;
-  for (const part in byPart) {
-    const partPoints = byPart[part];
-    const methods = {};
-    let nonMethodScore = 0;
-
-    partPoints.forEach(p => {
-      const value = srgGetMarkValue_(p.mark);
-      if (p.branch && p.branch.startsWith("METHOD")) {
-        if (!methods[p.branch]) methods[p.branch] = 0;
-        methods[p.branch] += value;
-      } else {
-        nonMethodScore += value;
-      }
-    });
-
-    const methodScores = Object.values(methods);
-    const maxMethodScore = methodScores.length > 0 ? Math.max(...methodScores) : 0;
-    totalScore += nonMethodScore + maxMethodScore;
-  }
-  return totalScore;
-}
-
-/**
  * Calculates the total awarded score from a list of graded results,
  * correctly awarding points for the best-scoring METHOD branch.
  * @param {Array<Object>} results The array of graded results.
@@ -193,22 +156,32 @@ function srgCalculateAwardedScore_(results) {
   let totalAwarded = 0;
   for (const part in byPart) {
     const partResults = byPart[part];
-    const methods = {};
-    let nonMethodScore = 0;
+    const branchGroups = {};
+    let nonBranchScore = 0;
  
     partResults.forEach(res => {
       const value = msaGetMarkValue_(res.mark || "");
-      if (res.branch && res.branch.startsWith("METHOD")) {
-        if (!methods[res.branch]) methods[res.branch] = 0;
-        methods[res.branch] += value;
+      const branch = res.branch || "";
+
+      if (branch.startsWith("METHOD")) {
+        if (!branchGroups.METHOD) branchGroups.METHOD = {};
+        if (!branchGroups.METHOD[branch]) branchGroups.METHOD[branch] = 0;
+        branchGroups.METHOD[branch] += value;
+      } else if (branch === "EITHER" || branch === "OR") {
+        if (!branchGroups.EITHER_OR) branchGroups.EITHER_OR = {};
+        if (!branchGroups.EITHER_OR[branch]) branchGroups.EITHER_OR[branch] = 0;
+        branchGroups.EITHER_OR[branch] += value;
       } else {
-        nonMethodScore += value;
+        nonBranchScore += value;
       }
     });
  
-    const methodScores = Object.values(methods);
-    const maxMethodScore = methodScores.length > 0 ? Math.max(...methodScores) : 0;
-    totalAwarded += nonMethodScore + maxMethodScore;
+    let partScore = nonBranchScore;
+    for (const group in branchGroups) {
+      const groupScores = Object.values(branchGroups[group]);
+      partScore += groupScores.length > 0 ? Math.max(...groupScores) : 0;
+    }
+    totalAwarded += partScore;
   }
   return totalAwarded;
 }

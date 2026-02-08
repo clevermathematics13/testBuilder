@@ -87,7 +87,7 @@ function runMSA_VR_One(docId) {
   const allOcrText = ocrPages.map(p => p.text || "").join("\n");
   let officialTotalMarks = null;
   // First, try to find the specific "Total [X marks]" pattern which is most reliable.
-  let mTotal = allOcrText.match(/Total\s*\[\s*(\d+)\s*marks?\s*\]/i);
+  let mTotal = allOcrText.match(/Total\s*:?\s*\[\s*(\d+)\s*marks?\s*\]/i);
 
   // If that's not found, fall back to the *last* instance of "[X marks]" in the document,
   // as sub-totals can appear earlier.

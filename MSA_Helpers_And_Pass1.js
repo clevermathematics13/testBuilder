@@ -136,34 +136,55 @@ function msaCalculateTotalPossibleScore_(points) {
   let totalScore = 0;
   for (const part in byPart) {
     const partPoints = byPart[part];
-    const methods = {};
-    let nonMethodScore = 0;
+    const branchGroups = {};
+    let nonBranchScore = 0;
 
     partPoints.forEach(p => {
-      const value = msaGetMarkValue_(p.mark);
-      if (p.branch && p.branch.startsWith("METHOD")) {
-        if (!methods[p.branch]) methods[p.branch] = 0;
-        methods[p.branch] += value;
+      const value = msaGetMarkValue_(p.mark || "");
+      const branch = p.branch || "";
+
+      if (branch.startsWith("METHOD")) {
+        // Group all METHODs together to find the max among them
+        if (!branchGroups.METHOD) branchGroups.METHOD = {};
+        if (!branchGroups.METHOD[branch]) branchGroups.METHOD[branch] = 0;
+        branchGroups.METHOD[branch] += value;
+      } else if (branch === "EITHER" || branch === "OR") {
+        // Group EITHER/OR together
+        if (!branchGroups.EITHER_OR) branchGroups.EITHER_OR = {};
+        if (!branchGroups.EITHER_OR[branch]) branchGroups.EITHER_OR[branch] = 0;
+        branchGroups.EITHER_OR[branch] += value;
       } else {
-        nonMethodScore += value;
+        // Accumulate points not in an alternative branch
+        nonBranchScore += value;
       }
     });
 
-    const methodScores = Object.values(methods);
-    const maxMethodScore = methodScores.length > 0 ? Math.max(...methodScores) : 0;
-    totalScore += nonMethodScore + maxMethodScore;
+    // Add the non-branch score for the part
+    let partScore = nonBranchScore;
+    // For each group of alternative branches, find the max and add it
+    for (const group in branchGroups) {
+      const groupScores = Object.values(branchGroups[group]);
+      partScore += groupScores.length > 0 ? Math.max(...groupScores) : 0;
+    }
+    totalScore += partScore;
   }
   return totalScore;
 }
 
 /**
  * Extracts the integer value from a mark token (e.g., "A2" -> 2).
+ * Also handles compound marks like "M1A1" -> 2.
  * @param {string} mark The mark token.
  * @returns {number} The integer value of the mark.
  */
 function msaGetMarkValue_(mark) {
-  const m = String(mark || "").match(/\d+$/);
-  return m ? parseInt(m[0], 10) : 1; // Default to 1 if no number found (e.g., for AG)
+  const tokens = String(mark || "").match(/[AMRN]\d+/g);
+  if (!tokens) return 1; // Default for non-standard marks like AG
+
+  return tokens.reduce((sum, token) => {
+    const m = token.match(/\d+$/);
+    return sum + (m ? parseInt(m[0], 10) : 0);
+  }, 0);
 }
 
 // --- IMAGES & OCR ---

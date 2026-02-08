@@ -58,9 +58,13 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     let line = String(lines[i] || "");
 
     // Part detector: (a), (b), etc.
-    const mPart = line.match(/^\s*\(\s*([a-z])\s*\)\s*/i);
+    // This regex now captures single letters, roman numerals, or combinations like (a)(i)
+    const mPart = line.match(/^\s*(\([a-z]\)|\([ivx]+\))+/i);
     if (mPart) {
-      part = mPart[1].toLowerCase();
+      // Normalize the part label by removing parentheses and joining, e.g., "(a)(i)" -> "ai"
+      part = mPart[0].replace(/[\s\(\)]/g, "").toLowerCase();
+      // 🟢 CRITICAL: When a new part is detected, reset the branch context.
+      branch = null;
       // Strip the part marker from the line so it's not duplicated in the requirement,
       // but allow the rest of the line to be processed for marks.
       line = line.substring(mPart[0].length).trim();
