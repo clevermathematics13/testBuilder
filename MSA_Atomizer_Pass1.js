@@ -63,17 +63,25 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     const mPart = line.match(/^\s*((?:\(\s*[a-z]\s*\)|\(\s*[ivx]+\s*\)\s*)+)/i);
     if (mPart) {
       const rawPart = mPart[1].replace(/[\s\(\)]/g, "").toLowerCase();
-      if (/^[ivx]+$/.test(rawPart) && lastLetterPart !== 'unknown') {
-        // This is a sub-part like (ii) without a letter, attach to the last letter part.
-        part = lastLetterPart + rawPart;
+      let newPart;
+
+      const primaryLetterMatch = rawPart.match(/^[a-z]/i);
+
+      if (primaryLetterMatch) {
+        // This is a primary part like (a) or (a)(i)
+        newPart = rawPart;
+        const newPrimaryPart = primaryLetterMatch[0];
+        // If the primary part letter changes, reset the branch.
+        if (newPrimaryPart !== lastLetterPart) {
+          branch = null;
+        }
+        lastLetterPart = newPrimaryPart;
       } else {
-        part = rawPart;
-        // If this is a new letter part, update our state.
-        const letterMatch = part.match(/^[a-z]+/i);
-        if (letterMatch) lastLetterPart = letterMatch[0];
+        // This is a sub-part like (ii) without a letter.
+        newPart = lastLetterPart + rawPart;
+        // Since it's a sub-part of the same letter, we do NOT reset the branch.
       }
-      // 🟢 CRITICAL: When a new part is detected, reset the branch context.
-      branch = null;
+      part = newPart;
       // Strip the part marker from the line so it's not duplicated in the requirement,
       // but allow the rest of the line to be processed for marks.
       line = line.substring(mPart[0].length).trim();

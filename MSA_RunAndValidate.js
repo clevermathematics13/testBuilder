@@ -87,7 +87,8 @@ function runMSA_VR_One(docId) {
   const allOcrText = ocrPages.map(p => p.text || "").join("\n");
   let officialTotalMarks = null;
   // First, try to find the specific "Total [X marks]" pattern which is most reliable.
-  let mTotal = allOcrText.match(/(?:Total\s*:?\s*)?\[\s*(?:Total\s*:?\s*)?(\d+)\s*marks?\s*\]/i);
+  // This handles "Total [X marks]" and "[Total: X marks]"
+  let mTotal = allOcrText.match(/(?:Total\s*:?\s*\[\s*(\d+)\s*marks?\s*\])|\[\s*Total\s*:?\s*(\d+)\s*marks?\s*\]/i);
 
   // If that's not found, fall back to the *last* instance of "[X marks]" in the document,
   // as sub-totals can appear earlier.
@@ -100,7 +101,8 @@ function runMSA_VR_One(docId) {
   }
 
   if (mTotal) {
-    officialTotalMarks = parseInt(mTotal[1], 10);
+    // The capture group will be in index 1 OR 2 depending on which part of the | matched.
+    officialTotalMarks = parseInt(mTotal[1] || mTotal[2], 10);
   }
 
   // Validation baseline (found marks, stats, etc.)
