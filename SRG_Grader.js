@@ -75,8 +75,8 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
   });
 
   // 4. Calculate scores, correctly handling alternative methods
-  const totalPossibleScore = srgCalculateTotalPossibleScore_(markscheme.points);
-  const awardedScore = srgCalculateAwardedScore_(results);
+  const totalPossibleScore = msaCalculateTotalPossibleScore_(markscheme.points);
+  const awardedScore = srgCalculateAwardedScore_(results, markscheme.points);
 
   // 5. Log the final report
   msaLog_("---  النهائية GRADING REPORT ---");
@@ -180,8 +180,8 @@ function srgCalculateTotalPossibleScore_(points) {
  * correctly awarding points for the best-scoring METHOD branch.
  * @param {Array<Object>} results The array of graded results.
  * @returns {number} The total awarded score.
- */
-function srgCalculateAwardedScore_(results) {
+*/
+function srgCalculateAwardedScore_(results, allPoints) {
   const byPart = {};
   results.forEach(res => {
     if (!res.awarded) return; // Only consider awarded points
@@ -189,15 +189,15 @@ function srgCalculateAwardedScore_(results) {
     if (!byPart[part]) byPart[part] = [];
     byPart[part].push(res);
   });
-
+ 
   let totalAwarded = 0;
   for (const part in byPart) {
     const partResults = byPart[part];
     const methods = {};
     let nonMethodScore = 0;
-
+ 
     partResults.forEach(res => {
-      const value = srgGetMarkValue_(res.mark);
+      const value = msaGetMarkValue_(res.mark);
       if (res.branch && res.branch.startsWith("METHOD")) {
         if (!methods[res.branch]) methods[res.branch] = 0;
         methods[res.branch] += value;
@@ -205,20 +205,10 @@ function srgCalculateAwardedScore_(results) {
         nonMethodScore += value;
       }
     });
-
+ 
     const methodScores = Object.values(methods);
     const maxMethodScore = methodScores.length > 0 ? Math.max(...methodScores) : 0;
     totalAwarded += nonMethodScore + maxMethodScore;
   }
   return totalAwarded;
-}
-
-/**
- * Extracts the integer value from a mark token (e.g., "A2" -> 2).
- * @param {string} mark The mark token.
- * @returns {number} The integer value of the mark.
- */
-function srgGetMarkValue_(mark) {
-  const m = String(mark || "").match(/\d+$/);
-  return m ? parseInt(m[0], 10) : 1; // Default to 1 if no number found (e.g., for AG)
 }

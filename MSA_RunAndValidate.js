@@ -83,6 +83,14 @@ function runMSA_VR_One(docId) {
   msaUpsertTextFile_(folder, "markscheme_ocr_combined.txt", combined.readable);
   msaUpsertJsonFile_(folder, "markscheme_ocr_combined.json", combined.json);
 
+  // 🟢 NEW: Extract the official total marks from the raw OCR text
+  const allOcrText = ocrPages.map(p => p.text || "").join("\n");
+  let officialTotalMarks = null;
+  const mTotal = allOcrText.match(/\[\s*(\d+)\s*marks?\s*\]/i);
+  if (mTotal) {
+    officialTotalMarks = parseInt(mTotal[1], 10);
+  }
+
   // Validation baseline (found marks, stats, etc.)
   const validation = msaBuildValidationReport_(cfg, docId, folder, ocrPages);
 
@@ -147,6 +155,11 @@ function runMSA_VR_One(docId) {
   // Always write best to a single stable filename for downstream grading
   msaUpsertJsonFile_(folder, "markscheme_points_best.json", best.best.json);
   msaUpsertTextFile_(folder, "markscheme_points_best_readable.txt", best.best.readable);
+
+  // 🟢 NEW: Add final scoring comparison to the validation object
+  const extractedTotalScore = msaCalculateTotalPossibleScore_(best.best.json.points);
+  validation.officialTotalMarks = officialTotalMarks;
+  validation.extractedTotalScore = extractedTotalScore;
 
   // Final validation report includes best decision info
   validation.best_pass = best.bestPass;
@@ -416,6 +429,16 @@ function msaFormatValidationReport_(validation) {
     lines.push("- If coverage is high but structure score is low, the parser is probably attaching Note/Award lines poorly or duplicating requirements.");
     lines.push("- Pass2 triggers on structure problems, not just missing marks.");
     lines.push("- Downstream grading should always use markscheme_points_best.json.");
+  }
+
+  if (v.officialTotalMarks !== null || v.extractedTotalScore !== null) {
+    lines.push("");
+    lines.push("TOTAL SCORE VALIDATION:");
+    lines.push("- Official Total (from '[X marks]' text): " + (v.officialTotalMarks !== null ? v.officialTotalMarks : "Not Found"));
+    lines.push("- Extracted Total (calculated from best pass): " + (v.extractedTotalScore !== null ? v.extractedTotalScore : "Not Calculated"));
+    if (v.officialTotalMarks !== null && v.extractedTotalScore !== null && v.officialTotalMarks === v.extractedTotalScore) {
+      lines.push("- ✅ Match: Yes");
+    }
   }
 
   return lines.join("\n");

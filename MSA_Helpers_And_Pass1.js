@@ -117,6 +117,55 @@ function msaWritePreviewArtifacts_(cfg, docId, folder, combined, pages) {
   }
 }
 
+// --- SCORING HELPERS (MOVED FROM SRG) ---
+
+/**
+ * Calculates the total possible score from a list of markscheme points,
+ * correctly handling alternative METHOD branches.
+ * @param {Array<Object>} points The array of points from markscheme_points_best.json.
+ * @returns {number} The total possible score.
+ */
+function msaCalculateTotalPossibleScore_(points) {
+  const byPart = {};
+  (points || []).forEach(p => {
+    const part = p.part || 'unknown';
+    if (!byPart[part]) byPart[part] = [];
+    byPart[part].push(p);
+  });
+
+  let totalScore = 0;
+  for (const part in byPart) {
+    const partPoints = byPart[part];
+    const methods = {};
+    let nonMethodScore = 0;
+
+    partPoints.forEach(p => {
+      const value = msaGetMarkValue_(p.mark);
+      if (p.branch && p.branch.startsWith("METHOD")) {
+        if (!methods[p.branch]) methods[p.branch] = 0;
+        methods[p.branch] += value;
+      } else {
+        nonMethodScore += value;
+      }
+    });
+
+    const methodScores = Object.values(methods);
+    const maxMethodScore = methodScores.length > 0 ? Math.max(...methodScores) : 0;
+    totalScore += nonMethodScore + maxMethodScore;
+  }
+  return totalScore;
+}
+
+/**
+ * Extracts the integer value from a mark token (e.g., "A2" -> 2).
+ * @param {string} mark The mark token.
+ * @returns {number} The integer value of the mark.
+ */
+function msaGetMarkValue_(mark) {
+  const m = String(mark || "").match(/\d+$/);
+  return m ? parseInt(m[0], 10) : 1; // Default to 1 if no number found (e.g., for AG)
+}
+
 // --- IMAGES & OCR ---
 function msaExtractPageImagesFromDoc_(cfg, docId, folder) {
   // NOTE: Google Docs API doesn't export pages as images directly.
