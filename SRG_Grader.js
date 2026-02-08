@@ -15,11 +15,11 @@ function runSingleGradeTest() {
   // --- ⭐️ PASTE YOUR TEST DATA HERE ⭐️ ---
 
   // The File ID of the student's handwritten work image you uploaded to Drive.
-  const STUDENT_WORK_IMAGE_ID = "YOUR_IMAGE_FILE_ID_HERE";
+  const STUDENT_WORK_IMAGE_ID = "1ELLBxY_kZKZDQ7OmHa8cyaz1oMBF8FyC";
 
   // The Doc ID of the *question* the student was answering.
   // This must be a docId that has already been processed by the MSA batch.
-  const QUESTION_DOC_ID = "A_QUESTION_DOC_ID_FROM_YOUR_BATCH";
+  const QUESTION_DOC_ID = "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88"; //mark scheme
 
   // -----------------------------------------
 
@@ -59,26 +59,28 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
   const studentText = studentOcr.text || "";
   msaLog_("SRG: Student OCR text length: " + studentText.length);
 
-  // 3. Grade each point
+  // 3. Grade each point against the student's work
   const results = [];
-  let totalAwarded = 0;
   markscheme.points.forEach(point => {
     const matchResult = srgMatchRequirement_(studentText, point.requirement);
-    if (matchResult.awarded) {
-      totalAwarded++;
-    }
     results.push({
       point_id: point.id,
       mark: point.mark,
       awarded: matchResult.awarded,
       match_score: matchResult.score,
-      requirement: point.requirement
+      requirement: point.requirement,
+      part: point.part,
+      branch: point.branch
     });
   });
 
-  // 4. Log the final report
+  // 4. Calculate scores, correctly handling alternative methods
+  const totalPossibleScore = srgCalculateTotalPossibleScore_(markscheme.points);
+  const awardedScore = srgCalculateAwardedScore_(results);
+
+  // 5. Log the final report
   msaLog_("---  النهائية GRADING REPORT ---");
-  msaLog_("Total Points Awarded: " + totalAwarded + " / " + markscheme.points.length);
+  msaLog_("Total Points Awarded: " + awardedScore + " / " + totalPossibleScore);
   results.forEach(res => {
     const status = res.awarded ? "✅ AWARDED" : "❌ NOT AWARDED";
     msaLog_(status + " (" + res.mark + ") - Match Score: " + res.match_score.toFixed(2) + " - ID: " + res.point_id);
@@ -134,4 +136,89 @@ function srgFindQuestionFolderByDocId_(cfg, questionDocId) {
 
   msaWarn_("SRG: Could not find an MSA output folder for docId: " + questionDocId);
   return null;
+}
+
+/**
+ * Calculates the total possible score from a list of markscheme points,
+ * correctly handling alternative METHOD branches.
+ * @param {Array<Object>} points The array of points from markscheme_points_best.json.
+ * @returns {number} The total possible score.
+ */
+function srgCalculateTotalPossibleScore_(points) {
+  const byPart = {};
+  points.forEach(p => {
+    const part = p.part || 'unknown';
+    if (!byPart[part]) byPart[part] = [];
+    byPart[part].push(p);
+  });
+
+  let totalScore = 0;
+  for (const part in byPart) {
+    const partPoints = byPart[part];
+    const methods = {};
+    let nonMethodScore = 0;
+
+    partPoints.forEach(p => {
+      const value = srgGetMarkValue_(p.mark);
+      if (p.branch && p.branch.startsWith("METHOD")) {
+        if (!methods[p.branch]) methods[p.branch] = 0;
+        methods[p.branch] += value;
+      } else {
+        nonMethodScore += value;
+      }
+    });
+
+    const methodScores = Object.values(methods);
+    const maxMethodScore = methodScores.length > 0 ? Math.max(...methodScores) : 0;
+    totalScore += nonMethodScore + maxMethodScore;
+  }
+  return totalScore;
+}
+
+/**
+ * Calculates the total awarded score from a list of graded results,
+ * correctly awarding points for the best-scoring METHOD branch.
+ * @param {Array<Object>} results The array of graded results.
+ * @returns {number} The total awarded score.
+ */
+function srgCalculateAwardedScore_(results) {
+  const byPart = {};
+  results.forEach(res => {
+    if (!res.awarded) return; // Only consider awarded points
+    const part = res.part || 'unknown';
+    if (!byPart[part]) byPart[part] = [];
+    byPart[part].push(res);
+  });
+
+  let totalAwarded = 0;
+  for (const part in byPart) {
+    const partResults = byPart[part];
+    const methods = {};
+    let nonMethodScore = 0;
+
+    partResults.forEach(res => {
+      const value = srgGetMarkValue_(res.mark);
+      if (res.branch && res.branch.startsWith("METHOD")) {
+        if (!methods[res.branch]) methods[res.branch] = 0;
+        methods[res.branch] += value;
+      } else {
+        nonMethodScore += value;
+      }
+    });
+
+    const methodScores = Object.values(methods);
+    const maxMethodScore = methodScores.length > 0 ? Math.max(...methodScores) : 0;
+    totalAwarded += nonMethodScore + maxMethodScore;
+  }
+  return totalAwarded;
+}
+
+/**
+ * Extracts the integer value from a mark token (e.g., "A2" -> 2).
+ * @param {string} mark The mark token.
+ * @returns {number} The integer value of the mark.
+ */
+function srgGetMarkValue_(mark) {
+  const m = String(mark || "").match(/\d+$/);
+  return m ? parseInt(m[0], 10) : 1; // Default to 1 if no number found (e.g., for AG)
 }

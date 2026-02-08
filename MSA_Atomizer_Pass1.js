@@ -70,6 +70,13 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     if (/^\s*EITHER\s*$/i.test(line)) { branch = "EITHER"; buffer = []; continue; }
     if (/^\s*OR\s*$/i.test(line))     { branch = "OR";     buffer = []; continue; }
     if (/^\s*THEN\s*$/i.test(line))   { branch = "THEN";   continue; }
+    const mMethod = line.match(/^\s*METHOD\s+(\d+)\s*$/i);
+    if (mMethod) {
+      // When a new method starts, it's a distinct branch.
+      branch = "METHOD" + mMethod[1];
+      buffer = []; // Clear buffer for the new method's context.
+      continue;
+    }
 
     // Mark-tag line?
     const markInfo = msaDetectMarkTag_(line);
