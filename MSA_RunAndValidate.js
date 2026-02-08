@@ -87,22 +87,18 @@ function runMSA_VR_One(docId) {
   const allOcrText = ocrPages.map(p => p.text || "").join("\n");
   let officialTotalMarks = null;
   // First, try to find the specific "Total [X marks]" pattern which is most reliable.
-  // This handles "Total [X marks]" and "[Total: X marks]"
-  let mTotal = allOcrText.match(/(?:Total\s*:?\s*\[\s*(\d+)\s*marks?\s*\])|\[\s*Total\s*:?\s*(\d+)\s*marks?\s*\]/i);
+  // This robust regex finds all variations of "[X marks]", including with "Total".
+  const totalMarksRegex = /(?:Total\s*:?\s*)?\[\s*(?:Total\s*:?\s*)?(\d+)\s*marks?\s*\]/ig;
+  const allMatches = allOcrText.match(totalMarksRegex);
 
-  // If that's not found, fall back to the *last* instance of "[X marks]" in the document,
-  // as sub-totals can appear earlier.
-  if (!mTotal) {
-    const allMatches = allOcrText.match(/\[\s*(\d+)\s*marks?\s*\]/ig);
-    if (allMatches && allMatches.length > 0) {
-      // Get the last match and re-run a non-global regex on it to get capture groups.
-      mTotal = allMatches[allMatches.length - 1].match(/\[\s*(\d+)\s*marks?\s*\]/i);
+  if (allMatches && allMatches.length > 0) {
+    // Always use the LAST match found in the document, as this will be the final total.
+    const lastMatchStr = allMatches[allMatches.length - 1];
+    // Re-run the regex in non-global mode to get the capture group.
+    const finalMatch = lastMatchStr.match(/(?:Total\s*:?\s*)?\[\s*(?:Total\s*:?\s*)?(\d+)\s*marks?\s*\]/i);
+    if (finalMatch && finalMatch[1]) {
+      officialTotalMarks = parseInt(finalMatch[1], 10);
     }
-  }
-
-  if (mTotal) {
-    // The capture group will be in index 1 OR 2 depending on which part of the | matched.
-    officialTotalMarks = parseInt(mTotal[1] || mTotal[2], 10);
   }
 
   // Validation baseline (found marks, stats, etc.)
