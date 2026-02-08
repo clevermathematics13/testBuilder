@@ -25,7 +25,7 @@ function assert_(condition, message) {
  * without needing to run the full OCR pipeline. This is much faster
  * and helps isolate parsing bugs.
  */
-function testAtomizerPasses_() {
+function testAtomizerPasses() {
   msaLog_("=== Running Atomizer Unit Tests ===");
 
   // --- Test Case 1: Simple, clean input ---
