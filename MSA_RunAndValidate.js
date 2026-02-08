@@ -169,9 +169,9 @@ function runMSA_VR_One(docId) {
   msaUpsertTextFile_(folder, "markscheme_points_best_readable.txt", best.best.readable);
 
   // 🟢 NEW: Add final scoring comparison to the validation object
-  const extractedTotalScore = msaCalculateTotalPossibleScore_(best.best.json.points);
+  const extractedScoreInfo = msaCalculateTotalPossibleScore_(best.best.json.points);
   validation.officialTotalMarks = officialTotalMarks;
-  validation.extractedTotalScore = extractedTotalScore;
+  validation.extractedTotalScore = extractedScoreInfo.total;
 
   // Final validation report includes best decision info
   validation.best_pass = best.bestPass;
@@ -195,10 +195,14 @@ function runMSA_VR_One(docId) {
 
   // 🟢 NEW: Explicitly log the final score validation check.
   msaLog_("--- TOTAL SCORE VALIDATION ---");
-  msaLog_("Official Total (from OCR text): " + (validation.officialTotalMarks !== null ? validation.officialTotalMarks : "Not Found"));
-  msaLog_("Extracted Total (calculated): " + validation.extractedTotalScore);
-  if (validation.officialTotalMarks !== null && validation.extractedTotalScore !== validation.officialTotalMarks) {
-    msaWarn_("Discrepancy found between official total (" + validation.officialTotalMarks + ") and extracted total (" + validation.extractedTotalScore + ").");
+  const officialTotal = validation.officialTotalMarks;
+  const extractedTotal = validation.extractedTotalScore;
+  msaLog_("Official Total (from OCR text): " + (officialTotal !== null ? officialTotal : "Not Found"));
+  msaLog_("Extracted Total (calculated): " + extractedTotal);
+  if (officialTotal !== null && extractedTotal !== officialTotal) {
+    msaWarn_("Discrepancy found between official total (" + officialTotal + ") and extracted total (" + extractedTotal + ").");
+    msaWarn_("Calculation breakdown:");
+    (extractedScoreInfo.breakdown || []).forEach(line => msaWarn_("  -> " + line));
   } else if (validation.officialTotalMarks !== null) {
     msaLog_("✅ Totals reconciled.");
   }

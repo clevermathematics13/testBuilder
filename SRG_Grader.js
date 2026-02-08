@@ -75,12 +75,12 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
   });
 
   // 4. Calculate scores, correctly handling alternative methods
-  const totalPossibleScore = msaCalculateTotalPossibleScore_(markscheme.points);
-  const awardedScore = srgCalculateAwardedScore_(results);
+  const possibleScoreInfo = msaCalculateTotalPossibleScore_(markscheme.points);
+  const awardedScoreInfo = srgCalculateAwardedScore_(results);
 
   // 5. Log the final report
   msaLog_("---  النهائية GRADING REPORT ---");
-  msaLog_("Total Points Awarded: " + awardedScore + " / " + totalPossibleScore);
+  msaLog_("Total Points Awarded: " + awardedScoreInfo.total + " / " + possibleScoreInfo.total);
   results.forEach(res => {
     const status = res.awarded ? "✅ AWARDED" : "❌ NOT AWARDED";
     msaLog_(status + " (" + res.mark + ") - Match Score: " + res.match_score.toFixed(2) + " - ID: " + res.point_id);
@@ -156,6 +156,7 @@ function srgCalculateAwardedScore_(results) {
   });
  
   let totalAwarded = 0;
+  const breakdown = [];
   for (const part in byPart) {
     const partResults = byPart[part];
 
@@ -163,9 +164,11 @@ function srgCalculateAwardedScore_(results) {
     const hasAwardedN = partResults.some(res => (res.mark || "").startsWith("N"));
     if (hasAwardedN) {
       // If any N mark is awarded, the score for this part is ONLY the sum of awarded N marks.
-      totalAwarded += partResults
+      const partScore = partResults
         .filter(res => (res.mark || "").startsWith("N"))
         .reduce((sum, res) => sum + msaGetMarkValue_(res.mark || ""), 0);
+      totalAwarded += partScore;
+      breakdown.push(`Part '${part}': ${partScore} marks (N-marks rule)`);
       continue; // Move to next part
     }
 

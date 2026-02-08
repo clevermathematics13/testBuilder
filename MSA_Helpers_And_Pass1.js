@@ -136,6 +136,7 @@ function msaCalculateTotalPossibleScore_(points) {
   });
 
   let totalScore = 0;
+  const breakdown = [];
   for (const part in byPart) {
     const partPoints = byPart[part];
 
@@ -143,6 +144,7 @@ function msaCalculateTotalPossibleScore_(points) {
     const nPoints = partPoints.filter(p => (p.mark || "").startsWith("N"));
     if (nPoints.length > 0) {
       totalScore += nPoints.reduce((sum, p) => sum + msaGetMarkValue_(p.mark || ""), 0);
+      breakdown.push(`Part '${part}': ${nPoints.reduce((sum, p) => sum + msaGetMarkValue_(p.mark || ""), 0)} marks (N-marks rule)`);
       continue; // Move to the next part
     }
 
@@ -177,8 +179,13 @@ function msaCalculateTotalPossibleScore_(points) {
       partScore += groupScores.length > 0 ? Math.max(...groupScores) : 0;
     }
     totalScore += partScore;
+    breakdown.push(`Part '${part}': ${partScore} marks`);
   }
-  return totalScore;
+
+  return {
+    total: totalScore,
+    breakdown: breakdown
+  };
 }
 
 /**
