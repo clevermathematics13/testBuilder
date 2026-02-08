@@ -81,5 +81,27 @@ function testAtomizerPasses() {
   assert_(thenAPoint_after.notes.some(n => n.includes("captured final value after THEN: -1/4")), "Test 3, Pass 3: Should capture the final value '-1/4' in notes.");
   msaLog_("✅ Test Case 3 Passed");
 
+
+  // --- Test Case 4: Input for Pass 2 "Simple Split" (mixed marks) ---
+  var mockOcrPages_MixedMark = [{
+    page: 1,
+    text: "(a) some requirement\nA2N2\n[4 marks]"
+  }];
+  var ocrByPage_MixedMark = { "1": mockOcrPages_MixedMark[0].text.split('\n') };
+
+  // Pass 1 should find one compound point
+  var pass1_mixed = msaAtomizePass1_(mockOcrPages_MixedMark, mockRules, null);
+  assert_(pass1_mixed.points.length === 1, "Test 4, Pass 1: Should find 1 compound point.");
+  assert_(pass1_mixed.points[0].mark === "A2N2", "Test 4, Pass 1: Mark should be 'A2N2'.");
+
+  // Pass 2 should perform a simple split
+  var pass2_mixed = msaAtomizerPass2_(pass1_mixed, ocrByPage_MixedMark);
+  assert_(pass2_mixed.points.length === 2, "Test 4, Pass 2: Should split into 2 points.");
+  assert_(pass2_mixed.points[0].mark === "A2", "Test 4, Pass 2: First split mark should be A2.");
+  assert_(pass2_mixed.points[1].mark === "N2", "Test 4, Pass 2: Second split mark should be N2.");
+  assert_(pass2_mixed.points[0].notes.some(n => n.includes("Simple split")), "Test 4, Pass 2: Should contain a simple split note.");
+  msaLog_("✅ Test Case 4 Passed");
+
+
   msaLog_("=== All Atomizer Unit Tests Passed! ✅ ===");
 }
