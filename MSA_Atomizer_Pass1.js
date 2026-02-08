@@ -111,8 +111,9 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
       pt.requirement = finalReqLines.join('\n').trim();
 
       // 🟢 FINAL GUARD: Only add the point if it has a valid requirement after all processing.
-      if (!pt.requirement) {
-        warnings.push("Page " + pageNum + ": mark " + pt.mark + " at line " + (i + 1) + " was ignored (empty requirement).");
+      // Allow compound marks to pass through even with no requirement, so Pass 2 can split them.
+      if (!pt.requirement && !msaIsCompoundMark_(pt.mark)) {
+        warnings.push("Page " + pageNum + ": mark " + pt.mark + " at line " + (i + 1) + " was ignored (simple mark with empty requirement).");
         continue; // Skip to the next line, do not add this point.
       }
 
@@ -181,6 +182,15 @@ function msaDetectMarkTag_(line) {
   }
 
   return null;
+}
+
+/**
+ * Helper to check if a mark string is compound (e.g., "A1A1", "M1A1").
+ */
+function msaIsCompoundMark_(mark) {
+  // Re-uses the same logic as the Pass 2 splitter.
+  const tokens = String(mark || "").match(/[AMRN]\d+/g);
+  return tokens && tokens.length > 1;
 }
 
 function msaTrimBlock_(s) {
