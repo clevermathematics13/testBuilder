@@ -74,6 +74,12 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     // Mark-tag line?
     const markInfo = msaDetectMarkTag_(line);
     if (markInfo) {
+      // If the mark was found at the end of a line with content,
+      // add that content to the buffer before creating the point.
+      if (markInfo.requirementPart) {
+        buffer.push(markInfo.requirementPart);
+      }
+
       let requirement = msaTrimBlock_(buffer.join("\n"));
       buffer = [];
 
@@ -122,32 +128,38 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
 function msaDetectMarkTag_(line) {
   const s = String(line || "").trim();
 
-  // Handle simple cases first: (AG) or AG
+  // Case 1: Handle simple cases like (AG) or AG
   if (/^\(?\s*AG\s*\)?$/.test(s)) {
-    return { mark: "AG" };
+    return { mark: "AG", requirementPart: null };
   }
 
-  // More complex marks like (M1), A1, A1A1, N2
-  // This regex looks for one or more mark tokens on a single line.
-  // e.g., "A1", "(M1)", "A1A1", "A1, M1"
+  // Find all potential mark tokens on the line
   const markTokens = s.match(/\b([AMRN]\d+)\b/g);
 
   if (!markTokens) {
     return null;
   }
 
-  // If the line contains other text, it's not a mark tag line.
-  // This is a heuristic to avoid grabbing marks from inside requirement text.
-  // We create a "clean" version of the line with marks and punctuation removed.
+  // Case 2: Check if it's a mark-only line (e.g., "(M1)" or "A1, A1")
   const stripped = s.replace(/\b([AMRN]\d+)\b/g, "").replace(/[\(\),;]/g, "").trim();
-  if (stripped.length > 0) {
-    return null;
+  if (stripped.length === 0) {
+    return {
+      mark: markTokens.join(""),
+      requirementPart: null // Indicates no requirement on this line
+    };
   }
 
-  // Join multiple tokens found, e.g., ["A1", "M1"] -> "A1M1"
-  return {
-    mark: markTokens.join("")
-  };
+  // Case 3: Check if it's a mark at the end of a line with content (e.g., "some text (A1)")
+  // This regex is specific to a single mark in parentheses at the very end.
+  const endOfLineMatch = s.match(/^(.*)\s+\(([AMRN]\d+)\)$/);
+  if (endOfLineMatch && markTokens.length === 1 && endOfLineMatch[2] === markTokens[0]) {
+    return {
+      mark: endOfLineMatch[2],
+      requirementPart: endOfLineMatch[1].trim()
+    };
+  }
+
+  return null;
 }
 
 function msaTrimBlock_(s) {
