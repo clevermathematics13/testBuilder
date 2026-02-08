@@ -164,11 +164,11 @@ function srgCalculateAwardedScore_(results) {
     const hasAwardedN = partResults.some(res => (res.mark || "").startsWith("N"));
     if (hasAwardedN) {
       // If any N mark is awarded, the score for this part is ONLY the sum of awarded N marks.
-      const partScore = partResults
+      const nScore = partResults
         .filter(res => (res.mark || "").startsWith("N"))
         .reduce((sum, res) => sum + msaGetMarkValue_(res.mark || ""), 0);
-      totalAwarded += partScore;
-      breakdown.push(`Part '${part}': ${partScore} marks (N-marks rule)`);
+      totalAwarded += nScore;
+      breakdown.push(`Part '${part}': ${nScore} marks (N-marks rule)`);
       continue; // Move to next part
     }
 

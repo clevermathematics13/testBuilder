@@ -143,8 +143,9 @@ function msaCalculateTotalPossibleScore_(points) {
     // 🟢 NEW: Heuristic for N marks. If N marks exist, they are the only score for this part.
     const nPoints = partPoints.filter(p => (p.mark || "").startsWith("N"));
     if (nPoints.length > 0) {
-      totalScore += nPoints.reduce((sum, p) => sum + msaGetMarkValue_(p.mark || ""), 0);
-      breakdown.push(`Part '${part}': ${nPoints.reduce((sum, p) => sum + msaGetMarkValue_(p.mark || ""), 0)} marks (N-marks rule)`);
+      const partScore = nPoints.reduce((sum, p) => sum + msaGetMarkValue_(p.mark || ""), 0);
+      totalScore += partScore;
+      breakdown.push(`Part '${part}': ${partScore} marks (N-marks rule)`);
       continue; // Move to the next part
     }
 

@@ -47,6 +47,7 @@ function msaPreprocessLines_(text, rules) {
 
 function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
   let part = "unknown";
+  let lastLetterPart = "unknown"; // 🟢 NEW: State for the last primary part, e.g., 'a'
   let branch = null;
 
   let buffer = [];
@@ -61,8 +62,16 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     // This regex now captures combinations of part markers, allowing for spaces between them, e.g., "(a) (i)"
     const mPart = line.match(/^\s*((?:\(\s*[a-z]\s*\)|\(\s*[ivx]+\s*\)\s*)+)/i);
     if (mPart) {
-      // Normalize the part label by removing parentheses and joining, e.g., "(a)(i)" -> "ai"
-      part = mPart[1].replace(/[\s\(\)]/g, "").toLowerCase();
+      const rawPart = mPart[1].replace(/[\s\(\)]/g, "").toLowerCase();
+      if (/^[ivx]+$/.test(rawPart) && lastLetterPart !== 'unknown') {
+        // This is a sub-part like (ii) without a letter, attach to the last letter part.
+        part = lastLetterPart + rawPart;
+      } else {
+        part = rawPart;
+        // If this is a new letter part, update our state.
+        const letterMatch = part.match(/^[a-z]+/i);
+        if (letterMatch) lastLetterPart = letterMatch[0];
+      }
       // 🟢 CRITICAL: When a new part is detected, reset the branch context.
       branch = null;
       // Strip the part marker from the line so it's not duplicated in the requirement,
