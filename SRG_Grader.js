@@ -149,7 +149,7 @@ function srgCalculateAwardedScore_(results) {
   results.forEach(res => {
     if (!res.awarded) return; // Only consider awarded points
     // 🟢 NEW: Group by the primary part letter
-    const primaryPart = (res.part || 'unknown').match(/^[a-z]+/i);
+    const primaryPart = (res.part || 'unknown').match(/^[a-z]/i);
     const partKey = primaryPart ? primaryPart[0] : 'unknown';
     if (!byPart[partKey]) byPart[partKey] = [];
     byPart[partKey].push(res);
