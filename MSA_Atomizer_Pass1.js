@@ -110,8 +110,10 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
       }
       pt.requirement = finalReqLines.join('\n').trim();
 
+      // 🟢 FINAL GUARD: Only add the point if it has a valid requirement after all processing.
       if (!pt.requirement) {
-        warnings.push("Page " + pageNum + ": mark " + pt.mark + " had empty requirement context.");
+        warnings.push("Page " + pageNum + ": mark " + pt.mark + " at line " + (i + 1) + " was ignored (empty requirement).");
+        continue; // Skip to the next line, do not add this point.
       }
 
       if (skipMapByPart && skipMapByPart[part]) {
