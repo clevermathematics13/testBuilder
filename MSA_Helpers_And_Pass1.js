@@ -128,14 +128,24 @@ function msaWritePreviewArtifacts_(cfg, docId, folder, combined, pages) {
 function msaCalculateTotalPossibleScore_(points) {
   const byPart = {};
   (points || []).forEach(p => {
-    const part = p.part || 'unknown';
-    if (!byPart[part]) byPart[part] = [];
-    byPart[part].push(p);
+    // 🟢 NEW: Group by the primary part letter (e.g., 'ai' becomes 'a')
+    const primaryPart = (p.part || 'unknown').match(/^[a-z]+/i);
+    const partKey = primaryPart ? primaryPart[0] : 'unknown';
+    if (!byPart[partKey]) byPart[partKey] = [];
+    byPart[partKey].push(p);
   });
 
   let totalScore = 0;
   for (const part in byPart) {
     const partPoints = byPart[part];
+
+    // 🟢 NEW: Heuristic for N marks. If N marks exist, they are the only score for this part.
+    const nPoints = partPoints.filter(p => (p.mark || "").startsWith("N"));
+    if (nPoints.length > 0) {
+      totalScore += nPoints.reduce((sum, p) => sum + msaGetMarkValue_(p.mark || ""), 0);
+      continue; // Move to the next part
+    }
+
     const branchGroups = {};
     let nonBranchScore = 0;
 

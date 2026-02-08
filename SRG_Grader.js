@@ -148,14 +148,27 @@ function srgCalculateAwardedScore_(results) {
   const byPart = {};
   results.forEach(res => {
     if (!res.awarded) return; // Only consider awarded points
-    const part = res.part || 'unknown';
-    if (!byPart[part]) byPart[part] = [];
-    byPart[part].push(res);
+    // 🟢 NEW: Group by the primary part letter
+    const primaryPart = (res.part || 'unknown').match(/^[a-z]+/i);
+    const partKey = primaryPart ? primaryPart[0] : 'unknown';
+    if (!byPart[partKey]) byPart[partKey] = [];
+    byPart[partKey].push(res);
   });
  
   let totalAwarded = 0;
   for (const part in byPart) {
     const partResults = byPart[part];
+
+    // 🟢 NEW: Heuristic for N marks.
+    const hasAwardedN = partResults.some(res => (res.mark || "").startsWith("N"));
+    if (hasAwardedN) {
+      // If any N mark is awarded, the score for this part is ONLY the sum of awarded N marks.
+      totalAwarded += partResults
+        .filter(res => (res.mark || "").startsWith("N"))
+        .reduce((sum, res) => sum + msaGetMarkValue_(res.mark || ""), 0);
+      continue; // Move to next part
+    }
+
     const branchGroups = {};
     let nonBranchScore = 0;
  
