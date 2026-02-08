@@ -55,15 +55,15 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
   const points = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const line = String(lines[i] || "");
+    let line = String(lines[i] || "");
 
     // Part detector: (a), (b), etc.
     const mPart = line.match(/^\s*\(\s*([a-z])\s*\)\s*/i);
     if (mPart) {
       part = mPart[1].toLowerCase();
-      // keep line content in buffer (it’s often meaningful)
-      buffer.push(line);
-      continue;
+      // Strip the part marker from the line so it's not duplicated in the requirement,
+      // but allow the rest of the line to be processed for marks.
+      line = line.substring(mPart[0].length).trim();
     }
 
     // Branch markers
