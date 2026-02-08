@@ -86,7 +86,19 @@ function runMSA_VR_One(docId) {
   // 🟢 NEW: Extract the official total marks from the raw OCR text
   const allOcrText = ocrPages.map(p => p.text || "").join("\n");
   let officialTotalMarks = null;
-  const mTotal = allOcrText.match(/\[\s*(\d+)\s*marks?\s*\]/i);
+  // First, try to find the specific "Total [X marks]" pattern which is most reliable.
+  let mTotal = allOcrText.match(/Total\s*\[\s*(\d+)\s*marks?\s*\]/i);
+
+  // If that's not found, fall back to the *last* instance of "[X marks]" in the document,
+  // as sub-totals can appear earlier.
+  if (!mTotal) {
+    const allMatches = allOcrText.match(/\[\s*(\d+)\s*marks?\s*\]/ig);
+    if (allMatches && allMatches.length > 0) {
+      // Get the last match and re-run a non-global regex on it to get capture groups.
+      mTotal = allMatches[allMatches.length - 1].match(/\[\s*(\d+)\s*marks?\s*\]/i);
+    }
+  }
+
   if (mTotal) {
     officialTotalMarks = parseInt(mTotal[1], 10);
   }

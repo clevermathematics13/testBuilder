@@ -76,7 +76,7 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
 
   // 4. Calculate scores, correctly handling alternative methods
   const totalPossibleScore = msaCalculateTotalPossibleScore_(markscheme.points);
-  const awardedScore = srgCalculateAwardedScore_(results, markscheme.points);
+  const awardedScore = srgCalculateAwardedScore_(results);
 
   // 5. Log the final report
   msaLog_("---  النهائية GRADING REPORT ---");
@@ -180,8 +180,8 @@ function srgCalculateTotalPossibleScore_(points) {
  * correctly awarding points for the best-scoring METHOD branch.
  * @param {Array<Object>} results The array of graded results.
  * @returns {number} The total awarded score.
-*/
-function srgCalculateAwardedScore_(results, allPoints) {
+ */
+function srgCalculateAwardedScore_(results) {
   const byPart = {};
   results.forEach(res => {
     if (!res.awarded) return; // Only consider awarded points

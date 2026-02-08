@@ -117,12 +117,13 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
       }
       pt.requirement = finalReqLines.join('\n').trim();
 
-      // 🟢 FINAL GUARD: Only add the point if it has a valid requirement after all processing.
-      // Allow compound marks to pass through even with no requirement, so Pass 2 can split them.
-      if (!pt.requirement && !msaIsCompoundMark_(pt.mark)) {
-        warnings.push("Page " + pageNum + ": mark " + pt.mark + " at line " + (i + 1) + " was ignored (simple mark with empty requirement).");
-        continue; // Skip to the next line, do not add this point.
-      }
+      // The guard below was removed because it was too aggressive. It correctly ignored simple marks
+      // with empty requirements, but it also incorrectly dropped valid marks that appeared on their
+      // own line (e.g., two consecutive "A1" lines). It is better to extract the point, even if its
+      // requirement is empty, and allow the scoring function to penalize its low structure score.
+      // if (!pt.requirement && !msaIsCompoundMark_(pt.mark)) {
+      //   continue;
+      // }
 
       if (skipMapByPart && skipMapByPart[part]) {
         pt.skip_autograde = true;
