@@ -92,9 +92,12 @@ function msaGetDocMeta_(cfg, docId) {
 
 // --- DRIVE IO ---
 function msaGetOrCreateQuestionFolder_(cfg, docId) {
-  var parent = DriveApp.getFolderById(cfg.MSA_PARENT_FOLDER_ID);
-  var name = "MSA_Q_" + docId;
-  var iter = parent.getFoldersByName(name);
+  const parent = DriveApp.getFolderById(cfg.MSA_PARENT_FOLDER_ID);
+  const meta = msaGetDocMeta_(cfg, docId);
+  // Sanitize the title to remove characters that are invalid in folder names
+  const cleanTitle = (meta.title || "Untitled").replace(/[\\/:"*?<>|]/g, '_');
+  const name = "MSA_Q_" + cleanTitle + "_" + docId;
+  const iter = parent.getFoldersByName(name);
   if (iter.hasNext()) return iter.next();
   return parent.createFolder(name);
 }

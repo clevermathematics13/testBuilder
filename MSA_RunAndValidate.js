@@ -10,7 +10,8 @@ function runMSA_VR_Batch() {
     "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88", // Example 1
     "1ogg4P9-_Q5-7GVgrtIbo355WjhYgoYs7Mjk0OOjO7Ho", // 22M.2.AHL.TZ2.H_7
     "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4",  // Example 3
-    "17VFlp49U15wcbOoSP7wNUdraz3TjElwYwyvavLErec8" // 22M.2.AHL.TZ2.H_6
+    "17VFlp49U15wcbOoSP7wNUdraz3TjElwYwyvavLErec8", // 22M.2.AHL.TZ2.H_6
+    "10JpdOR7L4xDl9gN0Ixckplf9kVLPTSmwRQ7cpeoQRdY" // 12M.1.AHL.TZ1.H_6
   ];
 
   for (let i = 0; i < docIds.length; i++) {
@@ -176,11 +177,11 @@ function runMSA_VR_One(docId) {
  * ========================================================= */
 
 function msaShouldTriggerPass2_(pointsJson, score, validation, cfg) {
-  // Check if any points look like "A1A1" (double marks)
-  const hasDoubleMarks = (pointsJson.points || []).some(p => /^([A-Z]\d+)\1$/i.test(p.mark || ""));
+  // Check if any points have compound marks (A1A1, M1A1, etc.) using the generic splitter function
+  const hasCompoundMarks = (pointsJson.points || []).some(p => msaSplitCompoundMark_(p.mark));
 
   const trigger = (
-    hasDoubleMarks || // 🟢 Force trigger if A1A1 is found
+    hasCompoundMarks || // 🟢 Force trigger if any compound mark is found
     (score.coverage < cfg.MSA_PASS2_COVERAGE_TRIGGER) ||
     (score.structure < cfg.MSA_PASS2_STRUCTURE_TRIGGER) ||
     (score.duplicateReqRatio > cfg.MSA_PASS2_DUP_REQ_TRIGGER) ||
@@ -189,7 +190,7 @@ function msaShouldTriggerPass2_(pointsJson, score, validation, cfg) {
 
   return {
     trigger: trigger,
-    reason: hasDoubleMarks ? "double_marks_detected" : (trigger ? "threshold" : "ok")
+    reason: hasCompoundMarks ? "compound_marks_detected" : (trigger ? "threshold" : "ok")
   };
 }
 
