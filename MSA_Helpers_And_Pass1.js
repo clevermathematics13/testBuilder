@@ -129,7 +129,7 @@ function msaCalculateTotalPossibleScore_(points) {
   const byPart = {};
   (points || []).forEach(p => {
     // 🟢 NEW: Group by the primary part letter (e.g., 'ai' becomes 'a')
-    const primaryPart = (p.part || 'unknown').match(/^[a-z]/i);
+    const primaryPart = (p.part || 'unknown').match(/^[a-z]/);
     const partKey = primaryPart ? primaryPart[0] : 'unknown';
     if (!byPart[partKey]) byPart[partKey] = [];
     byPart[partKey].push(p);
