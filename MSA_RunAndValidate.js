@@ -9,7 +9,7 @@ function runMSA_VR_Batch() {
   const docIds = [
     "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88", // 14M.2.AHL.TZ2.H_1
     "1ogg4P9-_Q5-7GVgrtIbo355WjhYgoYs7Mjk0OOjO7Ho", // 22M.2.AHL.TZ2.H_7
-    "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4",  // Example 3
+    "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4",  // 18M.1.SL.TZ2.S_5
     "17VFlp49U15wcbOoSP7wNUdraz3TjElwYwyvavLErec8", // 22M.2.AHL.TZ2.H_6
     "10JpdOR7L4xDl9gN0Ixckplf9kVLPTSmwRQ7cpeoQRdY" // 12M.1.AHL.TZ1.H_6
   ];
@@ -192,6 +192,17 @@ function runMSA_VR_One(docId) {
   if (pass2) msaLog_("Pass2 points: " + pass2.json.points.length + " (warnings: " + pass2.json.warnings.length + ")");
   msaLog_("Pass3 points: " + pass3.json.points.length + " (warnings: " + pass3.json.warnings.length + ")");
   msaLog_("BEST = " + best.bestPass + " points=" + best.best.json.points.length);
+
+  // 🟢 NEW: Explicitly log the final score validation check.
+  msaLog_("--- TOTAL SCORE VALIDATION ---");
+  msaLog_("Official Total (from OCR text): " + (validation.officialTotalMarks !== null ? validation.officialTotalMarks : "Not Found"));
+  msaLog_("Extracted Total (calculated): " + validation.extractedTotalScore);
+  if (validation.officialTotalMarks !== null && validation.extractedTotalScore !== validation.officialTotalMarks) {
+    msaWarn_("Discrepancy found between official total (" + validation.officialTotalMarks + ") and extracted total (" + validation.extractedTotalScore + ").");
+  } else if (validation.officialTotalMarks !== null) {
+    msaLog_("✅ Totals reconciled.");
+  }
+  msaLog_("------------------------------");
 
   const dt = Math.round((Date.now() - t0) / 1000);
   msaLog_("=== MSA-VR (Validation & Repair) END === (duration " + dt + "s)");
