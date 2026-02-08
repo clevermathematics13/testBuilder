@@ -149,14 +149,28 @@ function msaDetectMarkTag_(line) {
     };
   }
 
-  // Case 3: Check if it's a mark at the end of a line with content (e.g., "some text (A1)")
-  // This regex is specific to a single mark in parentheses at the very end.
-  const endOfLineMatch = s.match(/^(.*)\s+\(([AMRN]\d+)\)$/);
-  if (endOfLineMatch && markTokens.length === 1 && endOfLineMatch[2] === markTokens[0]) {
-    return {
-      mark: endOfLineMatch[2],
-      requirementPart: endOfLineMatch[1].trim()
-    };
+  // Case 3: Check for marks in parentheses at the end of a line with content.
+  // e.g., "some text (A1)" or "other text (A1,A1)"
+  const endOfLineMatch = s.match(/^(.*)\s+\((.*)\)$/);
+  if (endOfLineMatch) {
+    const requirementPart = endOfLineMatch[1].trim();
+    const marksPart = endOfLineMatch[2];
+
+    // Validate that the part in parentheses *only* contains mark tokens and separators.
+    const marksPartTokens = marksPart.match(/\b([AMRN]\d+)\b/g);
+    if (!marksPartTokens) {
+      // The content in parentheses was not a mark, e.g., "some text (see note)".
+      return null;
+    }
+
+    const marksPartStripped = marksPart.replace(/\b([AMRN]\d+)\b/g, "").replace(/[\(\),;]/g, "").trim();
+    if (marksPartStripped.length === 0) {
+      // This is a valid end-of-line mark construct.
+      return {
+        mark: marksPartTokens.join(""),
+        requirementPart: requirementPart
+      };
+    }
   }
 
   return null;
