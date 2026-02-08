@@ -134,14 +134,14 @@ function msaDetectMarkTag_(line) {
   }
 
   // Find all potential mark tokens on the line
-  const markTokens = s.match(/\b([AMRN]\d+)\b/g);
+  const markTokens = s.match(/[AMRN]\d+/g);
 
   if (!markTokens) {
     return null;
   }
 
   // Case 2: Check if it's a mark-only line (e.g., "(M1)" or "A1, A1")
-  const stripped = s.replace(/\b([AMRN]\d+)\b/g, "").replace(/[\(\),;]/g, "").trim();
+  const stripped = s.replace(/[AMRN]\d+/g, "").replace(/[\(\),;]/g, "").trim();
   if (stripped.length === 0) {
     return {
       mark: markTokens.join(""),
@@ -157,13 +157,13 @@ function msaDetectMarkTag_(line) {
     const marksPart = endOfLineMatch[2];
 
     // Validate that the part in parentheses *only* contains mark tokens and separators.
-    const marksPartTokens = marksPart.match(/\b([AMRN]\d+)\b/g);
+    const marksPartTokens = marksPart.match(/[AMRN]\d+/g);
     if (!marksPartTokens) {
       // The content in parentheses was not a mark, e.g., "some text (see note)".
       return null;
     }
 
-    const marksPartStripped = marksPart.replace(/\b([AMRN]\d+)\b/g, "").replace(/[\(\),;]/g, "").trim();
+    const marksPartStripped = marksPart.replace(/[AMRN]\d+/g, "").replace(/[\(\),;]/g, "").trim();
     if (marksPartStripped.length === 0) {
       // This is a valid end-of-line mark construct.
       return {

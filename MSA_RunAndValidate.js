@@ -461,8 +461,9 @@ function msaCountMarkTokensLoose_(text) {
       return;
     }
 
-    // find tokens like A1, M1, R1, etc
-    const matches = s.match(/\b([A-Z]{1,2}\d)\b/g);
+    // find tokens like A1, M1, R1, etc. Use a regex without word boundaries
+    // to correctly count joined marks like A1A1.
+    const matches = s.match(/[A-Z]{1,2}\d/g);
     if (!matches) return;
 
     matches.forEach(tok => {
