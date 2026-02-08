@@ -197,7 +197,7 @@ function srgCalculateAwardedScore_(results) {
     let nonMethodScore = 0;
  
     partResults.forEach(res => {
-      const value = msaGetMarkValue_(res.mark);
+      const value = msaGetMarkValue_(res.mark || "");
       if (res.branch && res.branch.startsWith("METHOD")) {
         if (!methods[res.branch]) methods[res.branch] = 0;
         methods[res.branch] += value;
