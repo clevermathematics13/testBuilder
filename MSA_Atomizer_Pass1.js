@@ -1,5 +1,5 @@
 /***********************
- * MSA_Atomizer_Pass1.gs
+ * MSA_Atomizer_Pass1.gs (updated)
  ***********************/
 
 function msaAtomizePass1_(pagesOcr, rules, skipMapByPart) {
