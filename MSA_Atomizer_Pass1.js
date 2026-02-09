@@ -66,17 +66,21 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
       const rawPart = mPart[1].replace(/[\s\(\)]/g, "").toLowerCase();
       const primaryLetterMatch = rawPart.match(/^[a-z]/);
 
-      if (primaryLetterMatch) {
+      if (primaryLetterMatch) { // e.g. (a) or (a)(i)
         // This is a primary part like (a) or (a)(i)
         newPart = rawPart;
-        lastLetterPart = primaryLetterMatch[0];
-      } else {
+        const newPrimaryPart = primaryLetterMatch[0];
+        // If the primary part letter changes, reset the branch.
+        if (newPrimaryPart !== lastLetterPart) {
+          branch = null;
+        }
+        lastLetterPart = newPrimaryPart;
+      } else { // e.g. (ii)
         // This is a sub-part like (ii) without a letter.
         newPart = lastLetterPart + rawPart;
+        // Since it's a sub-part of the same letter, we do NOT reset the branch.
       }
       part = newPart;
-      // 🟢 CRITICAL: Unconditionally reset the branch whenever a new part is detected.
-      branch = null;
       // Strip the part marker from the line so it's not duplicated in the requirement,
       // but allow the rest of the line to be processed for marks.
       line = line.substring(mPart[0].length).trim();
