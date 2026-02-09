@@ -64,15 +64,16 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     if (mPart) {
       let newPart;
       const rawPart = mPart[1].replace(/[\s\(\)]/g, "").toLowerCase();
-      const primaryLetterMatch = rawPart.match(/^[a-z]/);
 
-      if (primaryLetterMatch) {
-        // This is a primary part like (a) or (a)(i)
-        newPart = rawPart;
-        lastLetterPart = primaryLetterMatch[0];
-      } else {
+      // If the part is purely roman numerals (i, ii, v), it's a sub-part.
+      if (/^[ivx]+$/.test(rawPart)) {
         // This is a sub-part like (ii) without a letter.
         newPart = lastLetterPart + rawPart;
+      } else {
+        // This is a primary part like (a) or (a)(i)
+        newPart = rawPart;
+        const primaryLetterMatch = rawPart.match(/^[a-z]/);
+        if (primaryLetterMatch) lastLetterPart = primaryLetterMatch[0];
       }
       part = newPart;
       branch = null; // Unconditionally reset branch on any new part.
