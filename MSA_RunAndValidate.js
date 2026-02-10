@@ -66,7 +66,6 @@ function runMSA_VR_One_ForWebApp(docId) {
  * Returns a status object for the UI.
  */
 function _runMsaPipeline(docId, ocrPages) {
-  const t0 = Date.now();
   const cfg = msaGetConfig_();
   const rules = msaLoadGradingRules_(cfg);
   const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
@@ -171,26 +170,7 @@ function _runMsaPipeline(docId, ocrPages) {
 function runMSA_VR_One(docId) {
   const t0 = Date.now();
   msaLog_("=== MSA-VR (Validation & Repair) START === docId=" + docId);
-  const cfg = msaGetConfig_();
-  // Build (or reuse) Drive folder
-  const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
-  // Convert Doc -> images
-  const pages = msaExtractPageImagesFromDoc_(cfg, docId, folder);
-  msaLog_("Extracted page-like images: " + pages.length);
-  // OCR each page
-  const ocrPages = [];
-  if (pages.length > 0) {
-    for (let p = 0; p < pages.length; p++) {
-      const page = pages[p];
-      const ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, {});
-      msaLog_(`Page ${page.page} Mathpix: latex_styled length=${(ocr.latex_styled || "").length}, text length=${(ocr.text || "").length}`);
-      ocrPages.push({ page: page.page, fileName: page.fileName, fileId: page.fileId, request_id: ocr.request_id || "", confidence: typeof ocr.confidence === "number" ? ocr.confidence : null, latex_styled: ocr.latex_styled || "", text: ocr.text || "" });
-    }
-  } else {
-    msaLog_("No images found. Extracting text directly from Google Doc body.");
-    const directPages = msaExtractTextFromDocDirectly_(docId);
-    directPages.forEach(p => ocrPages.push(p));
-  }
+  const { ocrPages, folder } = runMSA_VR_One_ForWebApp(docId, true); // Run the OCR part without the pipeline
 
   // Run the core pipeline and log the results for the non-UI batch runner.
   const result = _runMsaPipeline(docId, ocrPages);
