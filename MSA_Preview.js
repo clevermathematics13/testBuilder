@@ -51,8 +51,9 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     // Configure MathJax
     MathJax = {
       tex: {
-        inlineMath: [['$', '$'], ['\\(', '\\)']],
-        displayMath: [['$$', '$$'], ['\\[', '\\]']]
+        // Use only LaTeX-native delimiters and correctly escape them for the JS string.
+        inlineMath: [['\\\\(', '\\\\)']],
+        displayMath: [['\\\\[', '\\\\]']]
       },
       svg: {
         fontCache: 'global'
