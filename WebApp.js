@@ -17,13 +17,16 @@ function doGet(e) {
  * Called by the UI to get the list of documents to process.
  */
 function getInitialData() {
-  const docIds = [
-    "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88",
-    "1ogg4P9-_Q5-7GVgrtIbo355WjhYgoYs7Mjk0OOjO7Ho",
-    "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4",
-    "17VFlp49U15wcbOoSP7wNUdraz3TjElwYwyvavLErec8",
-    "10JpdOR7L4xDl9gN0Ixckplf9kVLPTSmwRQ7cpeoQRdY"
-  ];
+  // It's better to fetch IDs dynamically than to hard-code them.
+  // For example, get all Google Docs from a specific folder.
+  // Replace "YOUR_FOLDER_ID_HERE" with the actual folder ID.
+  const sourceFolderId = "YOUR_FOLDER_ID_HERE";
+  const folder = DriveApp.getFolderById(sourceFolderId);
+  const files = folder.getFilesByType(MimeType.GOOGLE_DOCS);
+  const docIds = [];
+  while (files.hasNext()) {
+    docIds.push(files.next().getId());
+  }
   const cfg = msaGetConfig_();
   const meta = docIds.map(id => msaGetDocMeta_(cfg, id));
   return meta;
