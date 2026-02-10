@@ -114,6 +114,9 @@ function _runMsaPipeline(docId, ocrPages) {
   msaUpsertJsonFile_(folder, "markscheme_points_best.json", best.best.json);
   msaUpsertTextFile_(folder, "markscheme_points_best_readable.txt", best.best.readable);
 
+  // Also update the preview HTML file based on the corrected/processed OCR data.
+  msaWritePreviewArtifacts_(cfg, docId, folder, combined, ocrPages);
+
   // Final validation and return status
   const extractedScoreInfo = msaCalculateTotalPossibleScore_(best.best.json.points);
   const officialTotal = officialTotalMarks;
@@ -122,7 +125,7 @@ function _runMsaPipeline(docId, ocrPages) {
   if (officialTotal !== null && extractedTotal !== officialTotal) {
     // 🟢 NEW: Delete marker file on discrepancy to ensure it can be re-processed.
     msaDeleteFileIfExists_(folder, "_RECONCILED.txt");
-    return {
+    const result = {
       status: 'NEEDS_REVIEW',
       doc_id: docId,
       doc_title: validation.doc_title,
@@ -130,16 +133,38 @@ function _runMsaPipeline(docId, ocrPages) {
       calculatedTotal: extractedTotal,
       ocrText: combined.readable,
       folderUrl: folder.getUrl(),
-      ocrPages: ocrPages // Pass the full structure for correction
+      ocrPages: ocrPages, // Pass the full structure for correction
+      pass1_points: rawPass1.points.length,
+      pass1_warnings: rawPass1.warnings.length,
+      pass2_points: pass2 ? pass2.json.points.length : null,
+      pass2_warnings: pass2 ? pass2.json.warnings.length : null,
+      pass3_points: rawPass3.points.length,
+      pass3_warnings: rawPass3.warnings.length,
+      best_pass: best.bestPass,
+      best_points: best.best.json.points.length,
+      score_breakdown: extractedScoreInfo.breakdown
     };
+    return result;
   } else {
     // 🟢 NEW: Create marker file on success.
     if (officialTotal !== null) msaUpsertTextFile_(folder, "_RECONCILED.txt", `Reconciled on: ${new Date().toISOString()}`);
-    return {
+    const result = {
       status: 'SUCCESS',
       doc_id: docId,
-      doc_title: validation.doc_title
+      doc_title: validation.doc_title,
+      officialTotal: officialTotal,
+      calculatedTotal: extractedTotal,
+      pass1_points: rawPass1.points.length,
+      pass1_warnings: rawPass1.warnings.length,
+      pass2_points: pass2 ? pass2.json.points.length : null,
+      pass2_warnings: pass2 ? pass2.json.warnings.length : null,
+      pass3_points: rawPass3.points.length,
+      pass3_warnings: rawPass3.warnings.length,
+      best_pass: best.bestPass,
+      best_points: best.best.json.points.length,
+      score_breakdown: extractedScoreInfo.breakdown
     };
+    return result;
   }
 }
 
@@ -147,11 +172,6 @@ function runMSA_VR_One(docId) {
   const t0 = Date.now();
   msaLog_("=== MSA-VR (Validation & Repair) START === docId=" + docId);
   const cfg = msaGetConfig_();
-  // Load rules (sheet overrides + defaults)
-  const rules = msaLoadGradingRules_(cfg);
-  msaLog_("grading_rules sheet loaded: " + rules.rules.length + " rules (defaults also available).");
-  msaLog_("grading_rules: source=" + rules.source + " | " + rules.url);
-
   // Build (or reuse) Drive folder
   const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
   // Convert Doc -> images
@@ -171,130 +191,28 @@ function runMSA_VR_One(docId) {
     const directPages = msaExtractTextFromDocDirectly_(docId);
     directPages.forEach(p => ocrPages.push(p));
   }
-  
+
   // Run the core pipeline and log the results for the non-UI batch runner.
   const result = _runMsaPipeline(docId, ocrPages);
-  
-  // 🟢 NEW: Extract the official total marks from the raw OCR text
-  const allOcrText = ocrPages.map(p => p.text || "").join("\n");
-  let officialTotalMarks = null;
-  // First, try to find the specific "Total [X marks]" pattern which is most reliable.
-  // This robust regex finds all variations of "[X marks]", including with "Total".
-  const totalMarksRegex = /(?:Total\s*:?\s*)?\[\s*(?:Total\s*:?\s*)?(\d+)\s*marks?\s*\]/ig;
-  const allMatches = allOcrText.match(totalMarksRegex);
-
-  if (allMatches && allMatches.length > 0) {
-    // Always use the LAST match found in the document, as this will be the final total.
-    const lastMatchStr = allMatches[allMatches.length - 1];
-    // Re-run the regex in non-global mode to get the capture group.
-    const finalMatch = lastMatchStr.match(/(?:Total\s*:?\s*)?\[\s*(?:Total\s*:?\s*)?(\d+)\s*marks?\s*\]/i);
-    if (finalMatch && finalMatch[1]) {
-      officialTotalMarks = parseInt(finalMatch[1], 10);
-    }
-  }
-
-  // Validation baseline (found marks, stats, etc.)
-  const validation = msaBuildValidationReport_(cfg, docId, folder, ocrPages);
-
-  // PREPARE OCR MAP for Atomizers (Pass 2 & 3 require line-by-line text per page)
-  const ocrByPage = {};
-  ocrPages.forEach(p => { ocrByPage[p.page] = (p.text || "").split(/\r?\n/); });
-
-  // PASS 1: primary extraction
-  // Call the robust Pass 1 (requires rules and null for skipMap)
-  const rawPass1 = msaAtomizePass1_(ocrPages, rules.rules, null);
-  const pass1 = {
-    json: rawPass1,
-    readable: JSON.stringify(rawPass1.points, null, 2)
-  };
-  msaUpsertJsonFile_(folder, "markscheme_points_pass1.json", rawPass1);
-  msaUpsertTextFile_(folder, "markscheme_points_pass1_readable.txt", pass1.readable);
-
-  // Decide if Pass2 should run
-  const pass1Score = msaScorePointsOutput_(pass1.json, validation, cfg);
-  const pass2ShouldRun = msaShouldTriggerPass2_(pass1.json, pass1Score, validation, cfg);
-
-  let pass2 = null;
-  if (pass2ShouldRun.trigger) {
-    msaLog_(
-      "Pass2 triggered. coverage=" + pass1Score.coverage.toFixed(2) +
-      " structure=" + pass1Score.structure.toFixed(2)
-    );
-
-    // Pass 2 takes the RAW json object, not the wrapper
-    const rawPass2 = msaAtomizerPass2_(pass1.json, ocrByPage);
-    pass2 = {
-      json: rawPass2,
-      readable: JSON.stringify(rawPass2.points, null, 2)
-    };
-
-    msaUpsertJsonFile_(folder, "markscheme_points_pass2.json", rawPass2);
-    msaUpsertTextFile_(folder, "markscheme_points_pass2_readable.txt", pass2.readable);
-  } else {
-    msaLog_(
-      "Pass2 not triggered. coverage=" + pass1Score.coverage.toFixed(2) +
-      " structure=" + pass1Score.structure.toFixed(2)
-    );
-  }
-
-  // PASS 3: enrichment pass (always run on "winner" candidate)
-  // Winner candidate is pass2 if it exists; otherwise pass1.
-  const candidate = pass2 ? pass2 : pass1;
-
-  // Pass 3 takes the RAW json object
-  const rawPass3 = msaAtomizerPass3_(candidate.json, ocrByPage);
-  const pass3 = {
-    json: rawPass3,
-    readable: JSON.stringify(rawPass3.points, null, 2)
-  };
-
-  msaUpsertJsonFile_(folder, "markscheme_points_pass3.json", rawPass3);
-  msaUpsertTextFile_(folder, "markscheme_points_pass3_readable.txt", pass3.readable);
-
-  // Choose BEST output (pass1 vs pass2 vs pass3)
-  const best = msaPickBestOutput_(pass1, pass2, pass3, validation, cfg);
-
-  // Always write best to a single stable filename for downstream grading
-  msaUpsertJsonFile_(folder, "markscheme_points_best.json", best.best.json);
-  msaUpsertTextFile_(folder, "markscheme_points_best_readable.txt", best.best.readable);
-
-  // 🟢 NEW: Add final scoring comparison to the validation object
-  const extractedScoreInfo = msaCalculateTotalPossibleScore_(best.best.json.points);
-  validation.officialTotalMarks = officialTotalMarks;
-  validation.extractedTotalScore = extractedScoreInfo.total;
-
-  // Final validation report includes best decision info
-  validation.best_pass = best.bestPass;
-  validation.best_file = "markscheme_points_best.json";
-  validation.pass1 = best.metrics.pass1;
-  if (best.metrics.pass2) validation.pass2 = best.metrics.pass2;
-  if (best.metrics.pass3) validation.pass3 = best.metrics.pass3;
-
-  msaUpsertTextFile_(folder, "markscheme_validation_report.txt", msaFormatValidationReport_(validation));
-  msaUpsertJsonFile_(folder, "markscheme_validation_report.json", validation);
-
-  // Preview artifacts (HTML + PNG copy of page 1 for quick Drive viewing)
-  msaWritePreviewArtifacts_(cfg, docId, folder, combined, pages);
 
   // Summary logs
   msaLog_("DONE ✅ Folder: " + folder.getName());
-  msaLog_("Pass1 points: " + pass1.json.points.length + " (warnings: " + pass1.json.warnings.length + ")");
-  if (pass2) msaLog_("Pass2 points: " + pass2.json.points.length + " (warnings: " + pass2.json.warnings.length + ")");
-  msaLog_("Pass3 points: " + pass3.json.points.length + " (warnings: " + pass3.json.warnings.length + ")");
-  msaLog_("BEST = " + best.bestPass + " points=" + best.best.json.points.length);
+  msaLog_("Pass1 points: " + result.pass1_points + " (warnings: " + result.pass1_warnings + ")");
+  if (result.pass2_points !== null) msaLog_("Pass2 points: " + result.pass2_points + " (warnings: " + result.pass2_warnings + ")");
+  msaLog_("Pass3 points: " + result.pass3_points + " (warnings: " + result.pass3_warnings + ")");
+  msaLog_("BEST = " + result.best_pass + " points=" + result.best_points);
 
   // 🟢 NEW: Explicitly log the final score validation check.
   msaLog_("--- TOTAL SCORE VALIDATION ---");
-  const officialTotal = validation.officialTotalMarks;
-  const extractedTotal = validation.extractedTotalScore;
+  const officialTotal = result.officialTotal;
+  const extractedTotal = result.calculatedTotal;
   msaLog_("Official Total (from OCR text): " + (officialTotal !== null ? officialTotal : "Not Found"));
   msaLog_("Extracted Total (calculated): " + extractedTotal);
-  if (officialTotal !== null && extractedTotal !== officialTotal) {
+  if (result.status === 'NEEDS_REVIEW') {
     msaWarn_("Discrepancy found between official total (" + officialTotal + ") and extracted total (" + extractedTotal + ").");
     msaWarn_("Calculation breakdown:");
-    (extractedScoreInfo.breakdown || []).forEach(line => msaWarn_("  -> " + line));
-    // No longer need to call the review queue sheet function here, as the UI handles it.
-  } else if (validation.officialTotalMarks !== null) {
+    (result.score_breakdown || []).forEach(line => msaWarn_("  -> " + line));
+  } else if (result.officialTotal !== null) {
     msaLog_("✅ Totals reconciled.");
   }
   msaLog_("------------------------------");
