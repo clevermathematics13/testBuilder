@@ -212,7 +212,7 @@ function runMSA_VR_One(docId) {
     msaWarn_("Discrepancy found between official total (" + officialTotal + ") and extracted total (" + extractedTotal + ").");
     msaWarn_("Calculation breakdown:");
     (result.score_breakdown || []).forEach(line => msaWarn_("  -> " + line));
-  } else if (result.officialTotal !== null) {
+  } else if (officialTotal !== null) {
     msaLog_("✅ Totals reconciled.");
   }
   msaLog_("------------------------------");
