@@ -24,8 +24,9 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     }
 
     if (renderableContent) {
-      // This content has LaTeX delimiters, so return it for MathJax to process.
-      return renderableContent;
+      // This content has LaTeX delimiters, so return it for MathJax to process
+      // after sanitizing it to fix common OCR and formatting errors.
+      return _sanitizeForMathJax_(renderableContent);
     }
 
     // If no renderable content was found, fall back to displaying the raw text in a formatted block.
@@ -71,4 +72,28 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
 </body>
 </html>`;
   return html.trim();
+}
+
+/**
+ * Sanitizes a string containing mixed text and LaTeX to fix common OCR errors
+ * before it is rendered by MathJax.
+ * @param {string} text The raw string from the OCR service.
+ * @returns {string} The sanitized string, ready for rendering.
+ */
+function _sanitizeForMathJax_(text) {
+  if (!text) return "";
+  let sanitized = text;
+
+  // Fix 3: "fake commands” like \A1 or \METHOD by removing the leading backslash.
+  // This prevents MathJax from interpreting them as invalid LaTeX commands.
+  sanitized = sanitized.replace(/\\(A\d+|M\d+|R\d+|N\d+|AG)\b/g, '$1');
+  sanitized = sanitized.replace(/\\(METHOD|NOTE|EITHER|OR|THEN)\b/g, '$1');
+
+  // Fix 2: Replace lone backslashes (often used as separators by OCR) with HTML line breaks.
+  // Handles ` \ ` between words.
+  sanitized = sanitized.replace(/ \s*\\ \s*/g, ' <br> ');
+  // Handles ` \` at the end of a line. The 'm' flag is for multiline matching.
+  sanitized = sanitized.replace(/ \s*\\\s*$/gm, '<br>');
+
+  return sanitized;
 }
