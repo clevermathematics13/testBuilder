@@ -40,23 +40,7 @@ function runMSA_VR_Batch() {
  * Returns a status object for the UI to handle.
  */
 function runMSA_VR_One_ForWebApp(docId) {
-  const cfg = msaGetConfig_();
-  const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
-
-  // Convert Doc -> images -> OCR
-  const pages = msaExtractPageImagesFromDoc_(cfg, docId, folder);
-  const ocrPages = [];
-  if (pages.length > 0) {
-    for (let p = 0; p < pages.length; p++) {
-      const page = pages[p];
-      const ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, {});
-      ocrPages.push({ page: page.page, fileName: page.fileName, fileId: page.fileId, request_id: ocr.request_id || "", confidence: typeof ocr.confidence === "number" ? ocr.confidence : null, latex_styled: ocr.latex_styled || "", text: ocr.text || "" });
-    }
-  } else {
-    const directPages = msaExtractTextFromDocDirectly_(docId);
-    directPages.forEach(p => ocrPages.push(p));
-  }
-
+  const { ocrPages } = _getOcrPages(docId);
   return _runMsaPipeline(docId, ocrPages);
 }
 
@@ -170,7 +154,7 @@ function _runMsaPipeline(docId, ocrPages) {
 function runMSA_VR_One(docId) {
   const t0 = Date.now();
   msaLog_("=== MSA-VR (Validation & Repair) START === docId=" + docId);
-  const { ocrPages, folder } = runMSA_VR_One_ForWebApp(docId, true); // Run the OCR part without the pipeline
+  const { ocrPages, folder } = _getOcrPages(docId);
 
   // Run the core pipeline and log the results for the non-UI batch runner.
   const result = _runMsaPipeline(docId, ocrPages);
@@ -199,6 +183,32 @@ function runMSA_VR_One(docId) {
 
   const dt = Math.round((Date.now() - t0) / 1000);
   msaLog_("=== MSA-VR (Validation & Repair) END === (duration " + dt + "s)");
+}
+
+/**
+ * Helper function to perform the initial OCR step.
+ * Returns the OCR pages and the folder object.
+ */
+function _getOcrPages(docId) {
+  const cfg = msaGetConfig_();
+  const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
+
+  // Convert Doc -> images -> OCR
+  const pages = msaExtractPageImagesFromDoc_(cfg, docId, folder);
+  msaLog_("Extracted page-like images: " + pages.length);
+  const ocrPages = [];
+  if (pages.length > 0) {
+    for (let p = 0; p < pages.length; p++) {
+      const page = pages[p];
+      const ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, {});
+      msaLog_(`Page ${page.page} Mathpix: latex_styled length=${(ocr.latex_styled || "").length}, text length=${(ocr.text || "").length}`);
+      ocrPages.push({ page: page.page, fileName: page.fileName, fileId: page.fileId, request_id: ocr.request_id || "", confidence: typeof ocr.confidence === "number" ? ocr.confidence : null, latex_styled: ocr.latex_styled || "", text: ocr.text || "" });
+    }
+  } else {
+    const directPages = msaExtractTextFromDocDirectly_(docId);
+    directPages.forEach(p => ocrPages.push(p));
+  }
+  return { ocrPages: ocrPages, folder: folder };
 }
 
 /* =========================================================
