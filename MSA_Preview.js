@@ -66,21 +66,30 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
   <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; }
-    .page-container { background-color: #fff; padding: 40px; margin: 20px; max-width: 800px; width: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    .page-container { background-color: #fff; padding: 40px; margin: 20px; max-width: 900px; width: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
     hr { margin: 2em 0; }
-    .row { display: flex; align-items: flex-start; margin-bottom: 0.75em; }
-    .main { flex: 1; padding-right: 15px; }
-    .mark { width: 90px; text-align: right; color: #333; flex-shrink: 0; padding-left: 14px; }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 90px;
+      column-gap: 18px;
+      align-items: start;
+      margin: 10px 0;
+    }
+    .main { font-size: 15px; }
+    .mark { text-align: right; white-space: nowrap; color: #333; }
     .mark .paren { font-style: italic; }
     .mark .plain { font-style: normal; }
-    .method-heading { font-weight: bold; margin-top: 1em; }
+    .row--heading .main { font-weight: 700; letter-spacing: 0.02em; }
+    .row--displaymath .mark { align-self: center; }
+    .row--equalsline .main { padding-left: 2.2em; }
     .note-box {
-      border: 1px solid #aaa;
+      border: 1px solid #333;
       padding: 10px 12px;
       margin: 10px 0 12px 0;
-      font-size: 0.9em;
-      border-radius: 4px;
-      background-color: #f9f9f9;
+      font-size: 0.95em;
+    }
+    mjx-container[display="true"] {
+      margin: 0.35em 0 !important;
     }
   </style>
 </head>
@@ -130,79 +139,118 @@ function _sanitizeForMathJax_(text) {
 function _buildStructuredHtmlFromText_(text) {
   if (!text) return "";
 
-  // Regex to find display math blocks and keep them as delimiters for splitting.
+  // Tokenize into a flat list of lines and display math blocks
   const displayMathRegex = /(\\\[[\s\S]*?\\\])/g;
-  const chunks = text.split(displayMathRegex);
+  const textAndMathChunks = text.split(displayMathRegex);
+  let allTokens = [];
+  textAndMathChunks.forEach(chunk => {
+    if (!chunk || chunk.trim() === '') return;
+    if (chunk.startsWith('\\[') && chunk.endsWith('\\]')) {
+      allTokens.push({ type: 'display-math', content: chunk });
+    } else {
+      const lines = chunk.split(/\r?\n/);
+      lines.forEach(line => {
+        allTokens.push({ type: 'text-line', content: line.trim() });
+      });
+    }
+  });
 
   const htmlRows = [];
-  const markRegex = /(\(\s*\b[AMRGN]\d+\b\s*\)|\b[AMRGN]\d+\b|\[\s*(?:Total\s*)?\d+\s*marks?\s*\])/g;
+  const markRegex = /(\(\s*\b[AMRGN]\d+\b\s*\)|\b[AMRGN]\d+\b|\[\s*(?:Total\s*)?\d+\s*marks?\s*\]|AG|\(AG\))/g;
+  const isMarkOnly = (line) => {
+    if (line.trim() === '') return false;
+    const marks = line.match(markRegex);
+    if (!marks) return false;
+    const stripped = line.replace(markRegex, '').replace(/[\s,;()]/g, '');
+    return stripped === '';
+  };
 
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    if (!chunk || chunk.trim() === '') continue;
+  let pendingMarks = [];
 
-    // Is this chunk a display math block?
-    if (chunk.startsWith('\\[') && chunk.endsWith('\\]')) {
-      let mainContent = chunk;
-      // Look ahead for "equals line" alignment
-      const nextTextChunk = chunks[i + 1] ? chunks[i + 1].trim() : '';
-      const nextMathChunk = chunks[i + 2];
-      if (nextTextChunk === '' && nextMathChunk && nextMathChunk.startsWith('\\[=')) {
-        // Found a subsequent equals line. Merge them into an 'aligned' environment.
-        const firstEq = chunk.slice(2, -2).trim(); // content of first \[...\]
-        const secondEq = nextMathChunk.slice(2, -2).trim(); // content of second \[...\]
-        mainContent = `\\[\\begin{aligned}${firstEq} \\\\\\\\ ${secondEq}\\end{aligned}\\]`;
-        i += 2; // Skip the next two chunks since we've consumed them.
-      }
+  for (let i = 0; i < allTokens.length; i++) {
+    const token = allTokens[i];
+    const content = token.content;
 
-      const rowHtml = `<div class="row"><div class="main">${mainContent}</div><div class="mark"></div></div>`;
-      htmlRows.push(rowHtml);
-    } else {
-      // This is a normal text chunk. Process it line by line.
-      const preNormalized = chunk.replace(/\b(METHOD\s+\d+)\b/g, '\n$1\n');
-      const lines = preNormalized.split(/\r?\n/);
+    if (content === '') continue;
 
-      for (let j = 0; j < lines.length; j++) {
-        let line = lines[j];
-        if (line.trim() === '') continue;
+    // Handle mark-only lines by adding to the buffer and skipping row creation.
+    if (token.type === 'text-line' && isMarkOnly(content)) {
+      const marks = content.match(markRegex) || [];
+      pendingMarks.push(...marks);
+      continue;
+    }
 
-        // Handle Note boxes
-        if (/^Note:/i.test(line.trim())) {
-          let noteContent = [line.trim()];
-          // Consume subsequent lines of the note until a blank line or new part/method.
-          while (j + 1 < lines.length && lines[j + 1].trim() !== '' && !/^\s*\(?[a-z]\)/i.test(lines[j + 1]) && !/^METHOD/i.test(lines[j + 1])) {
-            j++;
-            noteContent.push(lines[j].trim());
-          }
-          const noteHtml = `<div class="row"><div class="main"><div class="note-box">${noteContent.join('<br>')}</div></div><div class="mark"></div></div>`;
-          htmlRows.push(noteHtml);
-          continue;
+    // Handle Note boxes
+    if (token.type === 'text-line' && /^Note:/i.test(content)) {
+      let noteContent = [content];
+      while (i + 1 < allTokens.length && allTokens[i + 1].type === 'text-line') {
+        const nextLine = allTokens[i + 1].content;
+        if (nextLine === '' || /^\s*\(?[a-z]\)/i.test(nextLine) || /^METHOD/i.test(nextLine) || isMarkOnly(nextLine)) {
+          break;
         }
-
-        let main = line;
-        const marks = [];
-
-        // Extract all mark tags from the line into the 'marks' array.
-        main = main.replace(markRegex, (match) => {
-          const trimmedMatch = match.trim();
-          marks.push({
-            text: trimmedMatch,
-            type: trimmedMatch.startsWith('(') ? 'paren' : 'plain'
-          });
-          return ''; // Remove the mark from the main content.
-        }).trim();
-
-        if (main || marks.length > 0) {
-          let mainClasses = ['main'];
-          if (/^METHOD\s+\d+$/i.test(main)) { mainClasses.push('method-heading'); }
-
-          const marksHtml = marks.map(m => `<div><span class="${m.type}">${m.text}</span></div>`).join('');
-          const rowHtml = `<div class="row"><div class="${mainClasses.join(' ')}">${main}</div><div class="mark">${marksHtml}</div></div>`;
-          htmlRows.push(rowHtml);
-        }
+        i++;
+        noteContent.push(nextLine);
       }
+      rows.push({ main: `<div class="note-box">${noteContent.join('<br>')}</div>`, marks: pendingMarks, type: 'note' });
+      pendingMarks = [];
+      continue;
+    }
+
+    // It's a content token. Create a row.
+    let main = content;
+    let currentMarks = [...pendingMarks];
+    pendingMarks = [];
+
+    if (token.type === 'text-line') {
+      main = main.replace(markRegex, (match) => {
+        currentMarks.push(match.trim());
+        return '';
+      }).trim();
+    }
+
+    if (main === '' && token.type === 'text-line') {
+      pendingMarks.push(...currentMarks);
+      continue;
+    }
+
+    rows.push({ main: main, marks: currentMarks, type: token.type });
+  }
+
+  // Attach any trailing marks to the last content row.
+  if (pendingMarks.length > 0 && rows.length > 0) {
+    let lastContentRowIndex = -1;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].type !== 'note') {
+        lastContentRowIndex = i;
+        break;
+      }
+    }
+    if (lastContentRowIndex !== -1) {
+      rows[lastContentRowIndex].marks.push(...pendingMarks);
     }
   }
 
-  return htmlRows.join('');
+  // Render the final HTML
+  return rows.map(row => {
+    if (row.type === 'note') {
+      const marksHtml = row.marks.map(m => `<div><span class="${m.startsWith('(') ? 'paren' : 'plain'}">${m}</span></div>`).join('');
+      return `<div class="row">${row.main}<div class="mark">${marksHtml}</div></div>`;
+    }
+
+    let rowClasses = ['row'];
+    if (/^METHOD\s+\d+$/i.test(row.main)) { rowClasses.push('row--heading'); }
+    if (row.type === 'display-math') {
+      rowClasses.push('row--displaymath');
+      if (row.main.trim().startsWith('\\[=')) {
+        rowClasses.push('row--equalsline');
+      }
+    }
+
+    const marksHtml = row.marks.map(m => {
+      const type = m.startsWith('(') ? 'paren' : 'plain';
+      return `<div><span class="${type}">${m}</span></div>`;
+    }).join('');
+
+    return `<div class="${rowClasses.join(' ')}"><div class="main">${row.main}</div><div class="mark">${marksHtml}</div></div>`;
+  }).join('');
 }
