@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body { font-family: sans-serif; margin: 20px; background-color: #f4f4f9; }
+      h1, h3 { color: #333; }
+      #controls, #status-container, #modal { padding: 15px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 15px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+      #status { min-height: 100px; background-color: #272822; color: #f8f8f2; padding: 10px; border-radius: 5px; overflow-y: auto; max-height: 300px; font-family: monospace; }
+      .log-entry { padding: 3px 5px; border-bottom: 1px solid #444; }
+      .log-error { color: #ff6b6b; }
+      .log-success { color: #a6e22e; }
+      .log-warn { color: #e6db74; }
+      #modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 100; }
+      #modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80%; max-width: 700px; z-index: 101; }
+      #ocr-textarea { width: 98%; height: 300px; margin-top: 10px; font-family: monospace; }
+      button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 5px; font-size: 14px; }
+      #run-batch-btn { background-color: #4CAF50; color: white; }
+      #run-batch-btn:disabled { background-color: #aaa; }
+      #submit-correction-btn { background-color: #008CBA; color: white; }
+      #skip-btn { background-color: #f44336; color: white; margin-left: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>MSA Validation & Repair</h1>
+    
+    <div id="controls">
+      <button id="run-batch-btn">Run Batch Process</button>
+    </div>
+
+    <div id="status-container">
+      <h3>Status Log</h3>
+      <div id="status"></div>
+    </div>
+
+    <div id="modal-backdrop">
+      <div id="modal">
+        <h3 id="modal-title">Human Review Required</h3>
+        <p>A score discrepancy was found for document: <strong id="modal-doc-title"></strong></p>
+        <ul>
+          <li><strong>Official Total:</strong> <span id="modal-official-total"></span></li>
+          <li><strong>Calculated Total:</strong> <span id="modal-calculated-total"></span></li>
+          <li><a id="modal-preview-link" href="#" target="_blank">Open Output Folder</a></li>
+        </ul>
+        <p>The OCR text below may be incorrect. Please edit it to match the source document and then submit your correction.</p>
+        <textarea id="ocr-textarea"></textarea>
+        <br><br>
+        <button id="submit-correction-btn">Submit Correction & Re-process</button>
+        <button id="skip-btn">Skip This Document</button>
+      </div>
+    </div>
+
+    <script>
+      let docQueue = [];
+      let currentDoc = null;
+      let reviewData = null;
+
+      document.getElementById('run-batch-btn').addEventListener('click', startBatch);
+      document.getElementById('submit-correction-btn').addEventListener('click', submitCorrection);
+      document.getElementById('skip-btn').addEventListener('click', skipAndProcessNext);
+
+      function log(message, type = '') {
+        const statusDiv = document.getElementById('status');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry ' + (type ? 'log-' + type : '');
+        entry.textContent = new Date().toLocaleTimeString() + ': ' + message;
+        statusDiv.appendChild(entry);
+        statusDiv.scrollTop = statusDiv.scrollHeight;
+      }
+
+      function startBatch() {
+        log('Fetching document list...');
+        document.getElementById('run-batch-btn').disabled = true;
+        google.script.run.withSuccessHandler(docs => {
+          docQueue = docs;
+          log(`Found ${docs.length} documents to process.`);
+          processNextDoc();
+        }).withFailureHandler(err => {
+          log('Failed to fetch documents: ' + err.message, 'error');
+          document.getElementById('run-batch-btn').disabled = false;
+        }).getInitialData();
+      }
+
+      function processNextDoc() {
+        if (docQueue.length === 0) {
+          log('Batch process complete!', 'success');
+          document.getElementById('run-batch-btn').disabled = false;
+          return;
+        }
+        currentDoc = docQueue.shift();
+        log(`Processing: ${currentDoc.title} (${currentDoc.id})...`);
+        google.script.run.withSuccessHandler(handleProcessResult).withFailureHandler(err => {
+          log(`Error processing ${currentDoc.title}: ${err.message}`, 'error');
+          processNextDoc();
+        }).processSingleDocForUI(currentDoc.id);
+      }
+
+      function handleProcessResult(result) {
+        if (result.status === 'NEEDS_REVIEW') {
+          log(`Discrepancy found for ${result.doc_title}. Awaiting human review...`, 'warn');
+          reviewData = result;
+          document.getElementById('modal-doc-title').textContent = `${result.doc_title} (${result.doc_id})`;
+          document.getElementById('modal-official-total').textContent = result.officialTotal;
+          document.getElementById('modal-calculated-total').textContent = result.calculatedTotal;
+          document.getElementById('modal-preview-link').href = result.folderUrl;
+          document.getElementById('ocr-textarea').value = result.ocrText;
+          document.getElementById('modal-backdrop').style.display = 'block';
+        } else if (result.status === 'SUCCESS') {
+          log(`Successfully processed ${result.doc_title}. Totals reconciled.`, 'success');
+          processNextDoc();
+        }
+      }
+
+      function submitCorrection() {
+        if (!reviewData) return;
+        const correctedText = document.getElementById('ocr-textarea').value;
+        log(`Submitting correction for ${reviewData.doc_title}...`);
+        document.getElementById('modal-backdrop').style.display = 'none';
+        google.script.run.withSuccessHandler(handleProcessResult).withFailureHandler(err => {
+          log(`Error re-processing ${reviewData.doc_title}: ${err.message}`, 'error');
+          processNextDoc();
+        }).reprocessWithCorrection(reviewData.doc_id, correctedText);
+      }
+
+      function skipAndProcessNext() {
+        log(`Skipping ${currentDoc.title}.`);
+        document.getElementById('modal-backdrop').style.display = 'none';
+        processNextDoc();
+      }
+    </script>
+  </body>
+</html>

@@ -26,12 +26,114 @@ function runMSA_VR_Batch() {
   msaLog_("=== MSA-VR (Validation & Repair) BATCH END ===");
 }
 
+/**
+ * Entry point for the Web App UI.
+ * Performs initial OCR and then runs the pipeline.
+ * Returns a status object for the UI to handle.
+ */
+function runMSA_VR_One_ForWebApp(docId) {
+  const cfg = msaGetConfig_();
+  const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
+
+  // Convert Doc -> images -> OCR
+  const pages = msaExtractPageImagesFromDoc_(cfg, docId, folder);
+  const ocrPages = [];
+  if (pages.length > 0) {
+    for (let p = 0; p < pages.length; p++) {
+      const page = pages[p];
+      const ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, {});
+      ocrPages.push({ page: page.page, fileName: page.fileName, fileId: page.fileId, request_id: ocr.request_id || "", confidence: typeof ocr.confidence === "number" ? ocr.confidence : null, latex_styled: ocr.latex_styled || "", text: ocr.text || "" });
+    }
+  } else {
+    const directPages = msaExtractTextFromDocDirectly_(docId);
+    directPages.forEach(p => ocrPages.push(p));
+  }
+
+  return _runMsaPipeline(docId, ocrPages);
+}
+
+/**
+ * The core pipeline logic, shared by initial runs and re-processing runs.
+ * Takes OCR pages as input and performs all parsing, validation, and reporting.
+ * Returns a status object for the UI.
+ */
+function _runMsaPipeline(docId, ocrPages) {
+  const t0 = Date.now();
+  const cfg = msaGetConfig_();
+  const rules = msaLoadGradingRules_(cfg);
+  const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
+
+  // Save combined OCR artifacts
+  const combined = msaBuildCombinedOcr_(cfg, docId, folder, ocrPages);
+  msaUpsertTextFile_(folder, "markscheme_ocr_combined.txt", combined.readable);
+  msaUpsertJsonFile_(folder, "markscheme_ocr_combined.json", combined.json);
+
+  const allOcrText = ocrPages.map(p => p.text || "").join("\n");
+  let officialTotalMarks = null;
+  const totalMarksRegex = /(?:Total\s*:?\s*)?\[\s*(?:Total\s*:?\s*)?(\d+)\s*marks?\s*\]/ig;
+  const allMatches = allOcrText.match(totalMarksRegex);
+  if (allMatches && allMatches.length > 0) {
+    const lastMatchStr = allMatches[allMatches.length - 1];
+    const finalMatch = lastMatchStr.match(/(?:Total\s*:?\s*)?\[\s*(?:Total\s*:?\s*)?(\d+)\s*marks?\s*\]/i);
+    if (finalMatch && finalMatch[1]) {
+      officialTotalMarks = parseInt(finalMatch[1], 10);
+    }
+  }
+
+  const validation = msaBuildValidationReport_(cfg, docId, folder, ocrPages);
+  const ocrByPage = {};
+  ocrPages.forEach(p => { ocrByPage[p.page] = (p.text || "").split(/\r?\n/); });
+
+  // Run all passes...
+  const rawPass1 = msaAtomizePass1_(ocrPages, rules.rules, null);
+  const pass1 = { json: rawPass1, readable: JSON.stringify(rawPass1.points, null, 2) };
+  const pass1Score = msaScorePointsOutput_(pass1.json, validation, cfg);
+  const pass2ShouldRun = msaShouldTriggerPass2_(pass1.json, pass1Score, validation, cfg);
+  let pass2 = null;
+  if (pass2ShouldRun.trigger) {
+    const rawPass2 = msaAtomizerPass2_(pass1.json, ocrByPage);
+    pass2 = { json: rawPass2, readable: JSON.stringify(rawPass2.points, null, 2) };
+  }
+  const candidate = pass2 ? pass2 : pass1;
+  const rawPass3 = msaAtomizerPass3_(candidate.json, ocrByPage);
+  const pass3 = { json: rawPass3, readable: JSON.stringify(rawPass3.points, null, 2) };
+  const best = msaPickBestOutput_(pass1, pass2, pass3, validation, cfg);
+
+  // Save all artifacts...
+  msaUpsertJsonFile_(folder, "markscheme_points_pass1.json", rawPass1);
+  if (pass2) msaUpsertJsonFile_(folder, "markscheme_points_pass2.json", pass2.json);
+  msaUpsertJsonFile_(folder, "markscheme_points_pass3.json", rawPass3);
+  msaUpsertJsonFile_(folder, "markscheme_points_best.json", best.best.json);
+  msaUpsertTextFile_(folder, "markscheme_points_best_readable.txt", best.best.readable);
+
+  // Final validation and return status
+  const extractedScoreInfo = msaCalculateTotalPossibleScore_(best.best.json.points);
+  const officialTotal = officialTotalMarks;
+  const extractedTotal = extractedScoreInfo.total;
+
+  if (officialTotal !== null && extractedTotal !== officialTotal) {
+    return {
+      status: 'NEEDS_REVIEW',
+      doc_id: docId,
+      doc_title: validation.doc_title,
+      officialTotal: officialTotal,
+      calculatedTotal: extractedTotal,
+      ocrText: combined.readable,
+      folderUrl: folder.getUrl()
+    };
+  } else {
+    return {
+      status: 'SUCCESS',
+      doc_id: docId,
+      doc_title: validation.doc_title
+    };
+  }
+}
+
 function runMSA_VR_One(docId) {
   const t0 = Date.now();
   msaLog_("=== MSA-VR (Validation & Repair) START === docId=" + docId);
-
   const cfg = msaGetConfig_();
-
   // Load rules (sheet overrides + defaults)
   const rules = msaLoadGradingRules_(cfg);
   msaLog_("grading_rules sheet loaded: " + rules.rules.length + " rules (defaults also available).");
@@ -39,50 +141,27 @@ function runMSA_VR_One(docId) {
 
   // Build (or reuse) Drive folder
   const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
-
   // Convert Doc -> images
   const pages = msaExtractPageImagesFromDoc_(cfg, docId, folder);
   msaLog_("Extracted page-like images: " + pages.length);
-
   // OCR each page
   const ocrPages = [];
   if (pages.length > 0) {
-    // Case A: Images found (Standard)
     for (let p = 0; p < pages.length; p++) {
       const page = pages[p];
-      const ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, {
-        formats: ["text", "latex_styled", "data"]
-      });
-
-      msaLog_(
-        "Page " + page.page +
-        " Mathpix: latex_styled length=" + ((ocr.latex_styled || "").length) +
-        ", text length=" + ((ocr.text || "").length)
-      );
-
-      ocrPages.push({
-        page: page.page,
-        fileName: page.fileName,
-        fileId: page.fileId,
-        request_id: ocr.request_id || "",
-        confidence: typeof ocr.confidence === "number" ? ocr.confidence : null,
-        latex_styled: ocr.latex_styled || "",
-        text: ocr.text || "",
-        data: ocr.data || []
-      });
+      const ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, {});
+      msaLog_(`Page ${page.page} Mathpix: latex_styled length=${(ocr.latex_styled || "").length}, text length=${(ocr.text || "").length}`);
+      ocrPages.push({ page: page.page, fileName: page.fileName, fileId: page.fileId, request_id: ocr.request_id || "", confidence: typeof ocr.confidence === "number" ? ocr.confidence : null, latex_styled: ocr.latex_styled || "", text: ocr.text || "" });
     }
   } else {
-    // Case B: No images found (Text-based Doc)
     msaLog_("No images found. Extracting text directly from Google Doc body.");
     const directPages = msaExtractTextFromDocDirectly_(docId);
     directPages.forEach(p => ocrPages.push(p));
   }
-
-  // Save combined OCR artifacts
-  const combined = msaBuildCombinedOcr_(cfg, docId, folder, ocrPages);
-  msaUpsertTextFile_(folder, "markscheme_ocr_combined.txt", combined.readable);
-  msaUpsertJsonFile_(folder, "markscheme_ocr_combined.json", combined.json);
-
+  
+  // Run the core pipeline and log the results for the non-UI batch runner.
+  const result = _runMsaPipeline(docId, ocrPages);
+  
   // 🟢 NEW: Extract the official total marks from the raw OCR text
   const allOcrText = ocrPages.map(p => p.text || "").join("\n");
   let officialTotalMarks = null;
@@ -201,6 +280,7 @@ function runMSA_VR_One(docId) {
     msaWarn_("Discrepancy found between official total (" + officialTotal + ") and extracted total (" + extractedTotal + ").");
     msaWarn_("Calculation breakdown:");
     (extractedScoreInfo.breakdown || []).forEach(line => msaWarn_("  -> " + line));
+    // No longer need to call the review queue sheet function here, as the UI handles it.
   } else if (validation.officialTotalMarks !== null) {
     msaLog_("✅ Totals reconciled.");
   }
