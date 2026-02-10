@@ -43,7 +43,7 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
   const cfg = msaGetConfig_();
 
   // 1. Find the markscheme folder and load the parsed points
-  const questionFolder = srgFindQuestionFolderByDocId_(cfg, questionDocId);
+  const questionFolder = msaFindQuestionFolderByDocId_(cfg, questionDocId);
   if (!questionFolder) return;
 
   const markscheme = msaReadJsonFileIfExists_(questionFolder, "markscheme_points_best.json");
@@ -118,24 +118,6 @@ function srgMatchRequirement_(studentOcrText, requirementText) {
   const THRESHOLD = 0.75; // 75% of keywords must match to award the point.
 
   return { awarded: matchRatio >= THRESHOLD, score: matchRatio };
-}
-
-/**
- * Finds the MSA output folder for a given question docId.
- * @param {object} cfg The configuration object.
- * @param {string} questionDocId The Google Doc ID of the question.
- * @returns {Drive.Folder|null} The folder object or null if not found.
- */
-function srgFindQuestionFolderByDocId_(cfg, questionDocId) {
-  const parentFolder = DriveApp.getFolderById(cfg.MSA_PARENT_FOLDER_ID);
-  const folderIterator = parentFolder.searchFolders('title contains "' + questionDocId + '"');
-
-  if (folderIterator.hasNext()) {
-    return folderIterator.next();
-  }
-
-  msaWarn_("SRG: Could not find an MSA output folder for docId: " + questionDocId);
-  return null;
 }
 
 /**

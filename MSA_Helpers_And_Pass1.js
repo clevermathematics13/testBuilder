@@ -102,6 +102,25 @@ function msaGetOrCreateQuestionFolder_(cfg, docId) {
   return parent.createFolder(name);
 }
 
+/**
+ * Finds the MSA output folder for a given question docId.
+ * Moved from SRG_Grader to be a shared utility.
+ * @param {object} cfg The configuration object.
+ * @param {string} questionDocId The Google Doc ID of the question.
+ * @returns {Drive.Folder|null} The folder object or null if not found.
+ */
+function msaFindQuestionFolderByDocId_(cfg, questionDocId) {
+  const parentFolder = DriveApp.getFolderById(cfg.MSA_PARENT_FOLDER_ID);
+  const folderIterator = parentFolder.searchFolders('title contains "' + questionDocId + '"');
+
+  if (folderIterator.hasNext()) {
+    return folderIterator.next();
+  }
+
+  msaWarn_("Could not find an MSA output folder for docId: " + questionDocId);
+  return null;
+}
+
 function msaCheckIfReconciled_(cfg, docId) {
   const parentFolder = DriveApp.getFolderById(cfg.MSA_PARENT_FOLDER_ID);
   const meta = msaGetDocMeta_(cfg, docId);
