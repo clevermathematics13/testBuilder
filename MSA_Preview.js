@@ -52,8 +52,8 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     MathJax = {
       tex: {
         // Use only LaTeX-native delimiters and correctly escape them for the JS string.
-        inlineMath: [['\\(', '\\)']],
-        displayMath: [['\\[', '\\]']],
+        inlineMath: [['\\\\(', '\\\\)']],
+        displayMath: [['\\\\[', '\\\\]']],
         processEscapes: true
       },
       svg: {
@@ -116,31 +116,46 @@ function _sanitizeForMathJax_(text) {
 function _buildStructuredHtmlFromText_(text) {
   if (!text) return "";
 
-  // Pre-normalize: Force METHOD headings onto their own lines to isolate them.
-  const preNormalized = text.replace(/\b(METHOD\s+\d+)\b/g, '\n$1\n');
-  const lines = preNormalized.split(/\r?\n/);
-  const htmlRows = [];
+  // Regex to find display math blocks and keep them as delimiters for splitting.
+  const displayMathRegex = /(\\\[[\s\S]*?\\\])/g;
+  const chunks = text.split(displayMathRegex);
 
+  const htmlRows = [];
   const markRegex = /(\(\s*\b[AMRGN]\d+\b\s*\)|\b[AMRGN]\d+\b|\[\s*(?:Total\s*)?\d+\s*marks?\s*\])/g;
 
-  for (const line of lines) {
-    let main = line;
-    const marks = [];
+  for (const chunk of chunks) {
+    if (!chunk) continue;
 
-    // Extract all mark tags from the line into the 'marks' array.
-    main = main.replace(markRegex, (match) => {
-      marks.push(match.trim());
-      return ''; // Remove the mark from the main content.
-    }).trim();
-
-    if (main || marks.length > 0) {
-      let mainClasses = ['main'];
-      if (/^METHOD\s+\d+$/i.test(main)) { mainClasses.push('method-heading'); }
-      if (/^Note:/i.test(main)) { mainClasses.push('note-text'); }
-
-      const marksHtml = marks.map(m => `<div>${m}</div>`).join('');
-      const rowHtml = `<div class="row"><div class="${mainClasses.join(' ')}">${main}</div><div class="mark">${marksHtml}</div></div>`;
+    // Is this chunk a display math block?
+    if (chunk.startsWith('\\[') && chunk.endsWith('\\]')) {
+      // Treat the entire math block as a single, atomic unit.
+      const rowHtml = `<div class="row"><div class="main">${chunk}</div><div class="mark"></div></div>`;
       htmlRows.push(rowHtml);
+    } else {
+      // This is a normal text chunk. Process it line by line.
+      const preNormalized = chunk.replace(/\b(METHOD\s+\d+)\b/g, '\n$1\n');
+      const lines = preNormalized.split(/\r?\n/);
+
+      for (const line of lines) {
+        let main = line;
+        const marks = [];
+
+        // Extract all mark tags from the line into the 'marks' array.
+        main = main.replace(markRegex, (match) => {
+          marks.push(match.trim());
+          return ''; // Remove the mark from the main content.
+        }).trim();
+
+        if (main || marks.length > 0) {
+          let mainClasses = ['main'];
+          if (/^METHOD\s+\d+$/i.test(main)) { mainClasses.push('method-heading'); }
+          if (/^Note:/i.test(main)) { mainClasses.push('note-text'); }
+
+          const marksHtml = marks.map(m => `<div>${m}</div>`).join('');
+          const rowHtml = `<div class="row"><div class="${mainClasses.join(' ')}">${main}</div><div class="mark">${marksHtml}</div></div>`;
+          htmlRows.push(rowHtml);
+        }
+      }
     }
   }
 
