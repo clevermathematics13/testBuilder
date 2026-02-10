@@ -155,7 +155,7 @@ function _buildStructuredHtmlFromText_(text) {
     }
   });
 
-  const htmlRows = [];
+  const rows = [];
   const markRegex = /(\(\s*\b[AMRGN]\d+\b\s*\)|\b[AMRGN]\d+\b|\[\s*(?:Total\s*)?\d+\s*marks?\s*\]|AG|\(AG\))/g;
   const isMarkOnly = (line) => {
     if (line.trim() === '') return false;
