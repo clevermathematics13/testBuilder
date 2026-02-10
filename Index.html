@@ -157,7 +157,7 @@
         google.script.run.withSuccessHandler(handleProcessResult).withFailureHandler(err => {
           log(`Error re-processing ${reviewData.doc_title}: ${err.message}`, 'error');
           processNextDoc();
-        }).reprocessWithCorrection(reviewData.doc_id, correctedText);
+        }).reprocessWithCorrection(reviewData.doc_id, correctedText, reviewData.ocrPages);
       }
 
       function skipAndProcessNext() {

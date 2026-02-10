@@ -40,15 +40,21 @@ function processSingleDocForUI(docId) {
 /**
  * Called by the UI to re-process a document with corrected OCR text.
  */
-function reprocessWithCorrection(docId, correctedOcrText) {
-  // Reconstruct the ocrPages structure from the single block of text
-  const ocrPages = [{
+function reprocessWithCorrection(docId, correctedOcrText, originalOcrPages) {
+  // The user edited the combined text. We will replace the text of all pages with this single block,
+  // treating it as a single, corrected page. This is simple and robust.
+  const correctedPages = [{
     page: 1,
     text: correctedOcrText,
+    // Preserve metadata from the original first page for consistency
+    fileName: (originalOcrPages && originalOcrPages[0]) ? originalOcrPages[0].fileName : 'corrected_page_1.png',
+    fileId: (originalOcrPages && originalOcrPages[0]) ? originalOcrPages[0].fileId : '',
+    latex_styled: correctedOcrText, // Use corrected text as fallback
     confidence: 1.0, // Manually corrected, so confidence is 1.0
-    request_id: "manual_correction"
+    request_id: "manual_correction",
+    data: [] // Data field is complex, safe to clear it for corrected text
   }];
-  return _runMsaPipeline(docId, ocrPages);
+  return _runMsaPipeline(docId, correctedPages);
 }
 
 /**

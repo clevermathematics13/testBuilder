@@ -129,7 +129,8 @@ function _runMsaPipeline(docId, ocrPages) {
       officialTotal: officialTotal,
       calculatedTotal: extractedTotal,
       ocrText: combined.readable,
-      folderUrl: folder.getUrl()
+      folderUrl: folder.getUrl(),
+      ocrPages: ocrPages // Pass the full structure for correction
     };
   } else {
     // 🟢 NEW: Create marker file on success.
