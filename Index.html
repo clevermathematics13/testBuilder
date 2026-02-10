@@ -18,6 +18,7 @@
       button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 5px; font-size: 14px; }
       #run-batch-btn { background-color: #4CAF50; color: white; }
       #compare-btn { background-color: #2196F3; color: white; margin-left: 10px; }
+      #compare-btn:disabled { background-color: #aaa; }
       #run-batch-btn:disabled { background-color: #aaa; }
       #submit-correction-btn { background-color: #008CBA; color: white; }
       #skip-btn { background-color: #f44336; color: white; margin-left: 10px; }
@@ -27,8 +28,8 @@
     <h1>MSA Validation & Repair</h1>
     
     <div id="controls">
-      <button id="run-batch-btn">Run Batch Process</button>
-      <button id="compare-btn">Compare Markscheme</button>
+      <button id="run-batch-btn" disabled>Run Batch Process</button>
+      <button id="compare-btn" disabled>Compare Markscheme</button>
     </div>
 
     <div id="status-container">
@@ -77,6 +78,19 @@
       let currentDoc = null;
       let reviewData = null;
 
+      // 🟢 NEW: Load initial data when the page loads to make all features available immediately.
+      window.addEventListener('load', function() {
+        log('Initializing... Fetching document list.');
+        google.script.run.withSuccessHandler(docs => {
+          initialDocData = docs;
+          log(`Ready. Found ${docs.length} documents.`);
+          document.getElementById('run-batch-btn').disabled = false;
+          document.getElementById('compare-btn').disabled = false;
+        }).withFailureHandler(err => {
+          log('Failed to fetch documents: ' + err.message, 'error');
+        }).getInitialData();
+      });
+
       document.getElementById('run-batch-btn').addEventListener('click', startBatch);
       document.getElementById('compare-btn').addEventListener('click', showComparePrompt);
       document.getElementById('submit-correction-btn').addEventListener('click', submitCorrection);
@@ -93,23 +107,22 @@
       }
 
       function startBatch() {
-        log('Fetching document list...');
+        if (initialDocData.length === 0) {
+          log('Document list not loaded. Please wait or refresh the page.', 'warn');
+          return;
+        }
+        log('Starting batch process...');
         document.getElementById('run-batch-btn').disabled = true;
-        google.script.run.withSuccessHandler(docs => {
-          docQueue = docs;
-          initialDocData = docs; // Store for later lookup
-          log(`Found ${docs.length} documents to process.`);
-          processNextDoc();
-        }).withFailureHandler(err => {
-          log('Failed to fetch documents: ' + err.message, 'error');
-          document.getElementById('run-batch-btn').disabled = false;
-        }).getInitialData();
+        document.getElementById('compare-btn').disabled = true;
+        docQueue = [...initialDocData]; // Use a copy of the initial data
+        processNextDoc();
       }
 
       function processNextDoc() {
         if (docQueue.length === 0) {
           log('Batch process complete!', 'success');
           document.getElementById('run-batch-btn').disabled = false;
+          document.getElementById('compare-btn').disabled = false;
           return;
         }
         currentDoc = docQueue.shift();

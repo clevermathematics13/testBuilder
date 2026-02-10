@@ -198,6 +198,10 @@ function srgCalculateAwardedScore_(results) {
       partScore += groupScores.length > 0 ? Math.max(...groupScores) : 0;
     }
     totalAwarded += partScore;
+    breakdown.push(`Part '${part}': ${partScore} marks`);
   }
-  return totalAwarded;
+  return {
+    total: totalAwarded,
+    breakdown: breakdown
+  };
 }
