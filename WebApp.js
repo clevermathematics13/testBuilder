@@ -73,18 +73,20 @@ function getPreviewDataByTitle(title) {
   // Assumes msaFindQuestionFolderByDocId_ is available from MSA_Helpers_And_Pass1.js
   const folder = msaFindQuestionFolderByDocId_(cfg, docId);
   if (!folder) {
-    throw new Error("Output folder not found for document ID: " + docId + ". Please process it first.");
+    // Instead of throwing, return a specific status object for the UI to handle.
+    return { status: 'NOT_PROCESSED', docId: docId, title: title, message: "Output folder not found. Please process the document first." };
   }
 
   const sourceDocUrl = DriveApp.getFileById(docId).getUrl();
 
   const previewFileIterator = folder.getFilesByName("markscheme_preview.html");
   if (!previewFileIterator.hasNext()) {
-    throw new Error("markscheme_preview.html not found in the output folder. Please run the MSA process first.");
+    // This is also a state where processing is incomplete.
+    return { status: 'NOT_PROCESSED', docId: docId, title: title, message: "'markscheme_preview.html' not found. Please re-process the document." };
   }
   const previewHtml = previewFileIterator.next().getBlob().getDataAsString();
 
-  return { sourceDocUrl: sourceDocUrl, previewHtml: previewHtml };
+  return { status: 'SUCCESS', sourceDocUrl: sourceDocUrl, previewHtml: previewHtml };
 }
 
 /**

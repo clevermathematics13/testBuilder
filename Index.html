@@ -95,10 +95,7 @@
         statusDiv.scrollTop = statusDiv.scrollHeight;
       }
 
-      function processSingleByPrompt() {
-        const questionTitle = prompt("Please enter the question code (title) to process:", "14M.2.AHL.TZ2.H_1");
-        if (!questionTitle) return;
-
+      function triggerProcessing(questionTitle) {
         log(`Processing: ${questionTitle}...`);
         document.getElementById('process-doc-btn').disabled = true;
         document.getElementById('compare-btn').disabled = true;
@@ -113,6 +110,12 @@
             document.getElementById('compare-btn').disabled = false;
           })
           .processSingleDocByTitle(questionTitle);
+      }
+
+      function processSingleByPrompt() {
+        const questionTitle = prompt("Please enter the question code (title) to process:", "14M.2.AHL.TZ2.H_1");
+        if (!questionTitle) return;
+        triggerProcessing(questionTitle);
       }
 
       function handleProcessResult(result) {
@@ -162,10 +165,17 @@
 
         log(`Fetching preview data for ${questionTitle}...`);
         google.script.run.withSuccessHandler(data => {
-          document.getElementById('compare-modal-title').textContent = `Compare: ${questionTitle}`;
-          document.getElementById('compare-iframe-left').src = data.sourceDocUrl;
-          document.getElementById('compare-iframe-right').srcdoc = data.previewHtml;
-          document.getElementById('compare-modal-backdrop').style.display = 'block';
+          if (data.status === 'SUCCESS') {
+            document.getElementById('compare-modal-title').textContent = `Compare: ${questionTitle}`;
+            document.getElementById('compare-iframe-left').src = data.sourceDocUrl;
+            document.getElementById('compare-iframe-right').srcdoc = data.previewHtml;
+            document.getElementById('compare-modal-backdrop').style.display = 'block';
+          } else if (data.status === 'NOT_PROCESSED') {
+            log(data.message, 'warn');
+            if (confirm(data.message + "\n\nWould you like to process it now?")) {
+              triggerProcessing(data.title);
+            }
+          }
         }).withFailureHandler(err => {
           log(`Error fetching preview data: ${err.message}`, 'error');
           alert(`Error fetching preview data: ${err.message}`);
