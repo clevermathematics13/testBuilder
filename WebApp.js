@@ -13,43 +13,31 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-/**
- * Called by the UI to get the list of documents to process.
- */
-function getInitialData() {
-  try {
-    // Get the parent folder ID from the central configuration file (MSA_Config.js).
-    // This avoids duplicating the ID and makes the system more robust.
-    const cfg = msaGetConfig_();
-    const sourceFolderId = cfg.MSA_PARENT_FOLDER_ID;
-
-    // Add logging and a check to ensure the ID is properly loaded from the config.
-    Logger.log(`getInitialData: Attempting to access folder with ID from MSA_Config.js: '${sourceFolderId}'`);
-    if (!sourceFolderId) {
-      throw new Error("The MSA_PARENT_FOLDER_ID is not set in your MSA_Config.js file. Please set it to a valid Google Drive folder ID.");
-    }
-
-    const folder = DriveApp.getFolderById(sourceFolderId);
-    const files = folder.getFilesByType(MimeType.GOOGLE_DOCS);
-    const docIds = [];
-    while (files.hasNext()) {
-      docIds.push(files.next().getId());
-    }
-    const meta = docIds.map(id => msaGetDocMeta_(cfg, id));
-    return meta;
-  } catch (e) {
-    Logger.log(`ERROR in getInitialData: ${e.stack}`);
-    // Re-throw a more user-friendly error to the front-end.
-    throw new Error(`Failed to fetch documents. Please check the folder ID and permissions. Details: ${e.message}`);
+function _findDocByTitle(title) {
+  const cfg = msaGetConfig_();
+  const sourceFolderId = cfg.MSA_PARENT_FOLDER_ID;
+  if (!sourceFolderId) {
+    throw new Error("The MSA_PARENT_FOLDER_ID is not set in your MSA_Config.js file.");
   }
+  const folder = DriveApp.getFolderById(sourceFolderId);
+  const files = folder.getFilesByName(title);
+  if (!files.hasNext()) {
+    throw new Error(`Document with title "${title}" not found in the parent folder.`);
+  }
+  const file = files.next();
+  if (files.hasNext()) {
+    msaWarn_(`Multiple documents found with title "${title}". Using the first one found.`);
+  }
+  return file;
 }
 
 /**
  * Called by the UI to process a single document.
  * This is the entry point for the initial OCR and parse.
  */
-function processSingleDocForUI(docId) {
-  return runMSA_VR_One_ForWebApp(docId);
+function processSingleDocByTitle(title) {
+  const file = _findDocByTitle(title);
+  return runMSA_VR_One_ForWebApp(file.getId());
 }
 
 /**
@@ -74,15 +62,18 @@ function reprocessWithCorrection(docId, correctedOcrText, originalOcrPages) {
 
 /**
  * Called by the UI to get the data needed for the comparison view.
- * @param {string} docId The ID of the document to compare.
+ * @param {string} title The title (question code) of the document to compare.
  * @returns {object} An object containing the source doc URL and the preview HTML.
  */
-function getPreviewData(docId) {
+function getPreviewDataByTitle(title) {
+  const file = _findDocByTitle(title);
+  const docId = file.getId();
+
   const cfg = msaGetConfig_();
   // Assumes msaFindQuestionFolderByDocId_ is available from MSA_Helpers_And_Pass1.js
   const folder = msaFindQuestionFolderByDocId_(cfg, docId);
   if (!folder) {
-    throw new Error("Output folder not found for document ID: " + docId);
+    throw new Error("Output folder not found for document ID: " + docId + ". Please process it first.");
   }
 
   const sourceDocUrl = DriveApp.getFileById(docId).getUrl();
@@ -94,4 +85,68 @@ function getPreviewData(docId) {
   const previewHtml = previewFileIterator.next().getBlob().getDataAsString();
 
   return { sourceDocUrl: sourceDocUrl, previewHtml: previewHtml };
+}
+
+/**
+ * Called by the UI to run a batch process on unreconciled documents.
+ * To prevent timeouts, this will only process a limited number of documents at a time.
+ * @param {number} [limit=5] The maximum number of documents to process in this batch.
+ * @returns {string} A summary message of the batch operation.
+ */
+function runBatchOnUnreconciled(limit) {
+  const BATCH_LIMIT = limit || 5;
+  msaLog_(`Starting batch process with a limit of ${BATCH_LIMIT} documents.`);
+
+  try {
+    const cfg = msaGetConfig_();
+    const sourceFolderId = cfg.MSA_PARENT_FOLDER_ID;
+    if (!sourceFolderId) {
+      throw new Error("The MSA_PARENT_FOLDER_ID is not set in your MSA_Config.js file.");
+    }
+
+    const folder = DriveApp.getFolderById(sourceFolderId);
+    const files = folder.getFilesByType(MimeType.GOOGLE_DOCS);
+    
+    const unreconciledIds = [];
+    while (files.hasNext()) {
+      const file = files.next();
+      const docId = file.getId();
+      // The msaCheckIfReconciled_ function returns true if a "_RECONCILED.txt" file exists.
+      if (!msaCheckIfReconciled_(cfg, docId)) {
+        unreconciledIds.push(docId);
+      }
+    }
+
+    const totalUnreconciled = unreconciledIds.length;
+    if (totalUnreconciled === 0) {
+      msaLog_("Batch complete: No unreconciled documents found.");
+      return "Batch complete: No unreconciled documents found.";
+    }
+
+    const docsToProcess = unreconciledIds.slice(0, BATCH_LIMIT);
+    let successCount = 0;
+    let errorCount = 0;
+
+    msaLog_(`Found ${totalUnreconciled} unreconciled documents. Processing the first ${docsToProcess.length}.`);
+
+    docsToProcess.forEach(docId => {
+      try {
+        msaLog_(`Batch processing: ${docId}`);
+        runMSA_VR_One_ForWebApp(docId);
+        successCount++;
+      } catch (e) {
+        msaErr_(`Error processing ${docId} in batch: ${e.message}`);
+        errorCount++;
+      }
+    });
+
+    const remaining = totalUnreconciled - docsToProcess.length;
+    const summary = `Batch finished. Processed: ${successCount}. Errors: ${errorCount}. Remaining unreconciled: ${remaining}.`;
+    msaLog_(summary);
+    return summary;
+
+  } catch (e) {
+    msaErr_(`Fatal error during batch process: ${e.stack}`);
+    throw new Error(`Batch process failed. Details: ${e.message}`);
+  }
 }

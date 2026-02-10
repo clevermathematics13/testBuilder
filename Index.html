@@ -17,8 +17,8 @@
       #ocr-textarea { width: 98%; height: 300px; margin-top: 10px; font-family: monospace; }
       button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 5px; font-size: 14px; }
       #run-batch-btn { background-color: #4CAF50; color: white; }
-      #compare-btn { background-color: #2196F3; color: white; margin-left: 10px; }
-      #compare-btn:disabled { background-color: #aaa; }
+      #compare-btn { background-color: #2196F3; color: white; }
+      button:disabled { background-color: #aaa; cursor: not-allowed; }
       #run-batch-btn:disabled { background-color: #aaa; }
       #submit-correction-btn { background-color: #008CBA; color: white; }
       #skip-btn { background-color: #f44336; color: white; margin-left: 10px; }
@@ -28,8 +28,8 @@
     <h1>MSA Validation & Repair</h1>
     
     <div id="controls">
-      <button id="run-batch-btn" disabled>Run Batch Process</button>
-      <button id="compare-btn" disabled>Compare Markscheme</button>
+      <button id="process-doc-btn">Process Document</button>
+      <button id="compare-btn" style="margin-left: 10px;">Compare Markscheme</button>
     </div>
 
     <div id="status-container">
@@ -73,28 +73,17 @@
     </div>
 
     <script>
-      let docQueue = [];
-      let initialDocData = []; // To store the full doc list for lookup
       let currentDoc = null;
       let reviewData = null;
 
-      // 🟢 NEW: Load initial data when the page loads to make all features available immediately.
       window.addEventListener('load', function() {
-        log('Initializing... Fetching document list.');
-        google.script.run.withSuccessHandler(docs => {
-          initialDocData = docs;
-          log(`Ready. Found ${docs.length} documents.`);
-          document.getElementById('run-batch-btn').disabled = false;
-          document.getElementById('compare-btn').disabled = false;
-        }).withFailureHandler(err => {
-          log('Failed to fetch documents: ' + err.message, 'error');
-        }).getInitialData();
+        log('Ready. Enter a document code to begin.');
       });
 
-      document.getElementById('run-batch-btn').addEventListener('click', startBatch);
+      document.getElementById('process-doc-btn').addEventListener('click', processSingleByPrompt);
       document.getElementById('compare-btn').addEventListener('click', showComparePrompt);
       document.getElementById('submit-correction-btn').addEventListener('click', submitCorrection);
-      document.getElementById('skip-btn').addEventListener('click', skipAndProcessNext);
+      document.getElementById('skip-btn').addEventListener('click', skipAndCloseModal);
       document.getElementById('close-compare-btn').addEventListener('click', () => { document.getElementById('compare-modal-backdrop').style.display = 'none'; });
 
       function log(message, type = '') {
@@ -106,34 +95,30 @@
         statusDiv.scrollTop = statusDiv.scrollHeight;
       }
 
-      function startBatch() {
-        if (initialDocData.length === 0) {
-          log('Document list not loaded. Please wait or refresh the page.', 'warn');
-          return;
-        }
-        log('Starting batch process...');
-        document.getElementById('run-batch-btn').disabled = true;
-        document.getElementById('compare-btn').disabled = true;
-        docQueue = [...initialDocData]; // Use a copy of the initial data
-        processNextDoc();
-      }
+      function processSingleByPrompt() {
+        const questionTitle = prompt("Please enter the question code (title) to process:", "14M.2.AHL.TZ2.H_1");
+        if (!questionTitle) return;
 
-      function processNextDoc() {
-        if (docQueue.length === 0) {
-          log('Batch process complete!', 'success');
-          document.getElementById('run-batch-btn').disabled = false;
-          document.getElementById('compare-btn').disabled = false;
-          return;
-        }
-        currentDoc = docQueue.shift();
-        log(`Processing: ${currentDoc.title} (${currentDoc.id})...`);
-        google.script.run.withSuccessHandler(handleProcessResult).withFailureHandler(err => {
-          log(`Error processing ${currentDoc.title}: ${err.message}`, 'error');
-          processNextDoc();
-        }).processSingleDocForUI(currentDoc.id);
+        log(`Processing: ${questionTitle}...`);
+        document.getElementById('process-doc-btn').disabled = true;
+        document.getElementById('compare-btn').disabled = true;
+
+        currentDoc = { title: questionTitle };
+
+        google.script.run
+          .withSuccessHandler(handleProcessResult)
+          .withFailureHandler(err => {
+            log(`Error processing ${questionTitle}: ${err.message}`, 'error');
+            document.getElementById('process-doc-btn').disabled = false;
+            document.getElementById('compare-btn').disabled = false;
+          })
+          .processSingleDocByTitle(questionTitle);
       }
 
       function handleProcessResult(result) {
+        document.getElementById('process-doc-btn').disabled = false;
+        document.getElementById('compare-btn').disabled = false;
+
         if (result.status === 'NEEDS_REVIEW') {
           log(`Discrepancy found for ${result.doc_title}. Awaiting human review...`, 'warn');
           reviewData = result;
@@ -145,7 +130,6 @@
           document.getElementById('modal-backdrop').style.display = 'block';
         } else if (result.status === 'SUCCESS') {
           log(`Successfully processed ${result.doc_title}. Totals reconciled.`, 'success');
-          processNextDoc();
         }
       }
 
@@ -154,38 +138,38 @@
         const correctedText = document.getElementById('ocr-textarea').value;
         log(`Submitting correction for ${reviewData.doc_title}...`);
         document.getElementById('modal-backdrop').style.display = 'none';
-        google.script.run.withSuccessHandler(handleProcessResult).withFailureHandler(err => {
-          log(`Error re-processing ${reviewData.doc_title}: ${err.message}`, 'error');
-          processNextDoc();
-        }).reprocessWithCorrection(reviewData.doc_id, correctedText, reviewData.ocrPages);
+
+        document.getElementById('process-doc-btn').disabled = true;
+        document.getElementById('compare-btn').disabled = true;
+
+        google.script.run
+          .withSuccessHandler(handleProcessResult)
+          .withFailureHandler(err => {
+            log(`Error re-processing ${reviewData.doc_title}: ${err.message}`, 'error');
+            document.getElementById('process-doc-btn').disabled = false;
+            document.getElementById('compare-btn').disabled = false;
+          }).reprocessWithCorrection(reviewData.doc_id, correctedText, reviewData.ocrPages);
       }
 
-      function skipAndProcessNext() {
+      function skipAndCloseModal() {
         log(`Skipping ${currentDoc.title}.`);
         document.getElementById('modal-backdrop').style.display = 'none';
-        processNextDoc();
       }
 
       function showComparePrompt() {
         const questionTitle = prompt("Please enter the question code (title) to compare:", "14M.2.AHL.TZ2.H_1");
         if (!questionTitle) return;
 
-        const doc = initialDocData.find(d => d.title.trim() === questionTitle.trim());
-        if (!doc) {
-          alert("Could not find a document with that title. Please check the name and try again.");
-          return;
-        }
-
-        log(`Fetching preview data for ${doc.title}...`);
+        log(`Fetching preview data for ${questionTitle}...`);
         google.script.run.withSuccessHandler(data => {
-          document.getElementById('compare-modal-title').textContent = `Compare: ${doc.title}`;
+          document.getElementById('compare-modal-title').textContent = `Compare: ${questionTitle}`;
           document.getElementById('compare-iframe-left').src = data.sourceDocUrl;
           document.getElementById('compare-iframe-right').srcdoc = data.previewHtml;
           document.getElementById('compare-modal-backdrop').style.display = 'block';
         }).withFailureHandler(err => {
           log(`Error fetching preview data: ${err.message}`, 'error');
           alert(`Error fetching preview data: ${err.message}`);
-        }).getPreviewData(doc.id);
+        }).getPreviewDataByTitle(questionTitle);
       }
     </script>
   </body>
