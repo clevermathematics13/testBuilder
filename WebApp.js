@@ -17,19 +17,31 @@ function doGet(e) {
  * Called by the UI to get the list of documents to process.
  */
 function getInitialData() {
-  // It's better to fetch IDs dynamically than to hard-code them.
-  // For example, get all Google Docs from a specific folder.
-  // Replace "YOUR_FOLDER_ID_HERE" with the actual folder ID.
-  const sourceFolderId = "YOUR_FOLDER_ID_HERE";
-  const folder = DriveApp.getFolderById(sourceFolderId);
-  const files = folder.getFilesByType(MimeType.GOOGLE_DOCS);
-  const docIds = [];
-  while (files.hasNext()) {
-    docIds.push(files.next().getId());
+  try {
+    // Get the parent folder ID from the central configuration file (MSA_Config.js).
+    // This avoids duplicating the ID and makes the system more robust.
+    const cfg = msaGetConfig_();
+    const sourceFolderId = cfg.MSA_PARENT_FOLDER_ID;
+
+    // Add logging and a check to ensure the ID is properly loaded from the config.
+    Logger.log(`getInitialData: Attempting to access folder with ID from MSA_Config.js: '${sourceFolderId}'`);
+    if (!sourceFolderId) {
+      throw new Error("The MSA_PARENT_FOLDER_ID is not set in your MSA_Config.js file. Please set it to a valid Google Drive folder ID.");
+    }
+
+    const folder = DriveApp.getFolderById(sourceFolderId);
+    const files = folder.getFilesByType(MimeType.GOOGLE_DOCS);
+    const docIds = [];
+    while (files.hasNext()) {
+      docIds.push(files.next().getId());
+    }
+    const meta = docIds.map(id => msaGetDocMeta_(cfg, id));
+    return meta;
+  } catch (e) {
+    Logger.log(`ERROR in getInitialData: ${e.stack}`);
+    // Re-throw a more user-friendly error to the front-end.
+    throw new Error(`Failed to fetch documents. Please check the folder ID and permissions. Details: ${e.message}`);
   }
-  const cfg = msaGetConfig_();
-  const meta = docIds.map(id => msaGetDocMeta_(cfg, id));
-  return meta;
 }
 
 /**
