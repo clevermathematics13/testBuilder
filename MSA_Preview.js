@@ -14,16 +14,22 @@
 function msaBuildPreviewHtml_(title, docId, ocrPages) {
   // Combine the 'latex_styled' content from all pages. This contains the LaTeX markup.
   const content = ocrPages.map(p => {
-    // Check if the content is properly wrapped for MathJax.
-    const hasLatexDelimiters = p.latex_styled && (p.latex_styled.includes('\\(') || p.latex_styled.includes('\\['));
-
-    if (hasLatexDelimiters) {
-      return p.latex_styled;
+    // Find the best content for rendering. Prefer latex_styled, but fall back to text,
+    // as sometimes latex_styled can be empty even if text has the correct markup.
+    let renderableContent = null;
+    if (p.latex_styled && (p.latex_styled.includes('\\(') || p.latex_styled.includes('\\['))) {
+      renderableContent = p.latex_styled;
+    } else if (p.text && (p.text.includes('\\(') || p.text.includes('\\['))) {
+      renderableContent = p.text;
     }
 
-    // If not, fall back to displaying the raw text in a formatted block.
-    // This handles cases where `latex_styled` is missing or polluted with plain text.
-    const rawText = p.latex_styled || p.text || '';
+    if (renderableContent) {
+      // This content has LaTeX delimiters, so return it for MathJax to process.
+      return renderableContent;
+    }
+
+    // If no renderable content was found, fall back to displaying the raw text in a formatted block.
+    const rawText = p.text || p.latex_styled || ''; // Prefer .text as it seems more reliable
     const escapedText = rawText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     return `
