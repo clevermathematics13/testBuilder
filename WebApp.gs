@@ -50,3 +50,27 @@ function reprocessWithCorrection(docId, correctedOcrText) {
   }];
   return _runMsaPipeline(docId, ocrPages);
 }
+
+/**
+ * Called by the UI to get the data needed for the comparison view.
+ * @param {string} docId The ID of the document to compare.
+ * @returns {object} An object containing the source doc URL and the preview HTML.
+ */
+function getPreviewData(docId) {
+  const cfg = msaGetConfig_();
+  // Assumes msaFindQuestionFolderByDocId_ is available from MSA_Helpers_And_Pass1.js
+  const folder = msaFindQuestionFolderByDocId_(cfg, docId);
+  if (!folder) {
+    throw new Error("Output folder not found for document ID: " + docId);
+  }
+
+  const sourceDocUrl = DriveApp.getFileById(docId).getUrl();
+
+  const previewFileIterator = folder.getFilesByName("markscheme_preview.html");
+  if (!previewFileIterator.hasNext()) {
+    throw new Error("markscheme_preview.html not found in the output folder. Please run the MSA process first.");
+  }
+  const previewHtml = previewFileIterator.next().getBlob().getDataAsString();
+
+  return { sourceDocUrl: sourceDocUrl, previewHtml: previewHtml };
+}

@@ -14,8 +14,16 @@ function runMSA_VR_Batch() {
     "10JpdOR7L4xDl9gN0Ixckplf9kVLPTSmwRQ7cpeoQRdY" // 12M.1.AHL.TZ1.H_6
   ];
 
+  const cfg = msaGetConfig_();
   for (let i = 0; i < docIds.length; i++) {
     const docId = docIds[i];
+
+    // 🟢 NEW: Check if already reconciled and skip if so.
+    if (msaCheckIfReconciled_(cfg, docId)) {
+      msaLog_(`Skipping ${docId} - already marked as reconciled.`);
+      continue;
+    }
+
     try {
       runMSA_VR_One(docId);
     } catch (e) {
@@ -112,6 +120,8 @@ function _runMsaPipeline(docId, ocrPages) {
   const extractedTotal = extractedScoreInfo.total;
 
   if (officialTotal !== null && extractedTotal !== officialTotal) {
+    // 🟢 NEW: Delete marker file on discrepancy to ensure it can be re-processed.
+    msaDeleteFileIfExists_(folder, "_RECONCILED.txt");
     return {
       status: 'NEEDS_REVIEW',
       doc_id: docId,
@@ -122,6 +132,8 @@ function _runMsaPipeline(docId, ocrPages) {
       folderUrl: folder.getUrl()
     };
   } else {
+    // 🟢 NEW: Create marker file on success.
+    if (officialTotal !== null) msaUpsertTextFile_(folder, "_RECONCILED.txt", `Reconciled on: ${new Date().toISOString()}`);
     return {
       status: 'SUCCESS',
       doc_id: docId,

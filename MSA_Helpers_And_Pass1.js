@@ -102,6 +102,31 @@ function msaGetOrCreateQuestionFolder_(cfg, docId) {
   return parent.createFolder(name);
 }
 
+function msaCheckIfReconciled_(cfg, docId) {
+  const parentFolder = DriveApp.getFolderById(cfg.MSA_PARENT_FOLDER_ID);
+  const meta = msaGetDocMeta_(cfg, docId);
+  const cleanTitle = (meta.title || "Untitled").replace(/[\\/:"*?<>|]/g, '_');
+  const folderName = "MSA_Q_" + docId + "_" + cleanTitle;
+
+  const folderIterator = parentFolder.getFoldersByName(folderName);
+  if (!folderIterator.hasNext()) {
+    return false; // Folder doesn't even exist, so not reconciled.
+  }
+
+  const folder = folderIterator.next();
+  const fileIterator = folder.getFilesByName("_RECONCILED.txt");
+
+  return fileIterator.hasNext(); // Returns true if the file exists.
+}
+
+function msaDeleteFileIfExists_(folder, filename) {
+  const files = folder.getFilesByName(filename);
+  if (files.hasNext()) {
+    const file = files.next();
+    file.setTrashed(true);
+  }
+}
+
 function msaWritePreviewArtifacts_(cfg, docId, folder, combined, pages) {
   if (typeof msaBuildPreviewHtml_ !== 'function') {
     msaLog_("msaBuildPreviewHtml_ not found (MSA_Preview.gs missing?). Skipping preview.");

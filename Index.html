@@ -11,11 +11,13 @@
       .log-error { color: #ff6b6b; }
       .log-success { color: #a6e22e; }
       .log-warn { color: #e6db74; }
-      #modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 100; }
+      .modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 100; }
       #modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80%; max-width: 700px; z-index: 101; }
+      #compare-modal { padding: 15px; border: 1px solid #ccc; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 95%; max-width: 1600px; z-index: 101; }
       #ocr-textarea { width: 98%; height: 300px; margin-top: 10px; font-family: monospace; }
       button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 5px; font-size: 14px; }
       #run-batch-btn { background-color: #4CAF50; color: white; }
+      #compare-btn { background-color: #2196F3; color: white; margin-left: 10px; }
       #run-batch-btn:disabled { background-color: #aaa; }
       #submit-correction-btn { background-color: #008CBA; color: white; }
       #skip-btn { background-color: #f44336; color: white; margin-left: 10px; }
@@ -26,6 +28,7 @@
     
     <div id="controls">
       <button id="run-batch-btn">Run Batch Process</button>
+      <button id="compare-btn">Compare Markscheme</button>
     </div>
 
     <div id="status-container">
@@ -33,7 +36,7 @@
       <div id="status"></div>
     </div>
 
-    <div id="modal-backdrop">
+    <div id="modal-backdrop" class="modal-backdrop">
       <div id="modal">
         <h3 id="modal-title">Human Review Required</h3>
         <p>A score discrepancy was found for document: <strong id="modal-doc-title"></strong></p>
@@ -50,14 +53,35 @@
       </div>
     </div>
 
+    <div id="compare-modal-backdrop" class="modal-backdrop">
+      <div id="compare-modal">
+        <h3 id="compare-modal-title">Compare Markscheme</h3>
+        <div style="display: flex; height: 80vh;">
+          <div style="flex: 1; margin-right: 10px;">
+            <h4>Original Google Doc</h4>
+            <iframe id="compare-iframe-left" style="width: 100%; height: 100%; border: 1px solid #ccc;"></iframe>
+          </div>
+          <div style="flex: 1;">
+            <h4>Rendered OCR Preview</h4>
+            <iframe id="compare-iframe-right" style="width: 100%; height: 100%; border: 1px solid #ccc;"></iframe>
+          </div>
+        </div>
+        <br>
+        <button id="close-compare-btn">Close</button>
+      </div>
+    </div>
+
     <script>
       let docQueue = [];
+      let initialDocData = []; // To store the full doc list for lookup
       let currentDoc = null;
       let reviewData = null;
 
       document.getElementById('run-batch-btn').addEventListener('click', startBatch);
+      document.getElementById('compare-btn').addEventListener('click', showComparePrompt);
       document.getElementById('submit-correction-btn').addEventListener('click', submitCorrection);
       document.getElementById('skip-btn').addEventListener('click', skipAndProcessNext);
+      document.getElementById('close-compare-btn').addEventListener('click', () => { document.getElementById('compare-modal-backdrop').style.display = 'none'; });
 
       function log(message, type = '') {
         const statusDiv = document.getElementById('status');
@@ -73,6 +97,7 @@
         document.getElementById('run-batch-btn').disabled = true;
         google.script.run.withSuccessHandler(docs => {
           docQueue = docs;
+          initialDocData = docs; // Store for later lookup
           log(`Found ${docs.length} documents to process.`);
           processNextDoc();
         }).withFailureHandler(err => {
@@ -126,6 +151,28 @@
         log(`Skipping ${currentDoc.title}.`);
         document.getElementById('modal-backdrop').style.display = 'none';
         processNextDoc();
+      }
+
+      function showComparePrompt() {
+        const questionTitle = prompt("Please enter the question code (title) to compare:", "14M.2.AHL.TZ2.H_1");
+        if (!questionTitle) return;
+
+        const doc = initialDocData.find(d => d.title.trim() === questionTitle.trim());
+        if (!doc) {
+          alert("Could not find a document with that title. Please check the name and try again.");
+          return;
+        }
+
+        log(`Fetching preview data for ${doc.title}...`);
+        google.script.run.withSuccessHandler(data => {
+          document.getElementById('compare-modal-title').textContent = `Compare: ${doc.title}`;
+          document.getElementById('compare-iframe-left').src = data.sourceDocUrl;
+          document.getElementById('compare-iframe-right').srcdoc = data.previewHtml;
+          document.getElementById('compare-modal-backdrop').style.display = 'block';
+        }).withFailureHandler(err => {
+          log(`Error fetching preview data: ${err.message}`, 'error');
+          alert(`Error fetching preview data: ${err.message}`);
+        }).getPreviewData(doc.id);
       }
     </script>
   </body>
