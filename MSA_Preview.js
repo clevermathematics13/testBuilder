@@ -24,9 +24,9 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     }
 
     if (renderableContent) {
-      // This content has LaTeX delimiters, so return it for MathJax to process
-      // after sanitizing it to fix common OCR and formatting errors.
-      return _sanitizeForMathJax_(renderableContent);
+      // Sanitize the text first, then build the structured two-column HTML.
+      const sanitized = _sanitizeForMathJax_(renderableContent);
+      return _buildStructuredHtmlFromText_(sanitized);
     }
 
     // If no renderable content was found, fall back to displaying the raw text in a formatted block.
@@ -52,8 +52,9 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     MathJax = {
       tex: {
         // Use only LaTeX-native delimiters and correctly escape them for the JS string.
-        inlineMath: [['\\\\(', '\\\\)']],
-        displayMath: [['\\\\[', '\\\\]']]
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']],
+        processEscapes: true
       },
       svg: {
         fontCache: 'global'
@@ -62,14 +63,22 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
   </script>
   <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; padding: 20px; color: #212529; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; }
+    .page-container { background-color: #fff; padding: 40px; margin: 20px; max-width: 800px; width: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
     hr { margin: 2em 0; }
+    .row { display: flex; align-items: flex-start; margin-bottom: 0.5em; }
+    .main { flex: 1; padding-right: 15px; }
+    .mark { width: 100px; text-align: right; color: #555; font-style: italic; flex-shrink: 0; }
+    .method-heading { font-weight: bold; margin-top: 1em; }
+    .note-text { font-style: italic; font-size: 0.9em; }
   </style>
 </head>
 <body>
-  <h3>${title}</h3>
-  <hr>
-  <div>${content}</div>
+  <div class="page-container">
+    <h3>${title}</h3>
+    <hr>
+    ${content}
+  </div>
 </body>
 </html>`;
   return html.trim();
@@ -97,4 +106,43 @@ function _sanitizeForMathJax_(text) {
   sanitized = sanitized.replace(/ \s*\\\s*$/gm, '<br>');
 
   return sanitized;
+}
+
+/**
+ * Parses a block of sanitized text into a two-column HTML structure.
+ * @param {string} text The sanitized text for one page.
+ * @returns {string} The generated HTML rows for the page.
+ */
+function _buildStructuredHtmlFromText_(text) {
+  if (!text) return "";
+
+  // Pre-normalize: Force METHOD headings onto their own lines to isolate them.
+  const preNormalized = text.replace(/\b(METHOD\s+\d+)\b/g, '\n$1\n');
+  const lines = preNormalized.split(/\r?\n/);
+  const htmlRows = [];
+
+  const markRegex = /(\(\s*\b[AMRGN]\d+\b\s*\)|\b[AMRGN]\d+\b|\[\s*(?:Total\s*)?\d+\s*marks?\s*\])/g;
+
+  for (const line of lines) {
+    let main = line;
+    const marks = [];
+
+    // Extract all mark tags from the line into the 'marks' array.
+    main = main.replace(markRegex, (match) => {
+      marks.push(match.trim());
+      return ''; // Remove the mark from the main content.
+    }).trim();
+
+    if (main || marks.length > 0) {
+      let mainClasses = ['main'];
+      if (/^METHOD\s+\d+$/i.test(main)) { mainClasses.push('method-heading'); }
+      if (/^Note:/i.test(main)) { mainClasses.push('note-text'); }
+
+      const marksHtml = marks.map(m => `<div>${m}</div>`).join('');
+      const rowHtml = `<div class="row"><div class="${mainClasses.join(' ')}">${main}</div><div class="mark">${marksHtml}</div></div>`;
+      htmlRows.push(rowHtml);
+    }
+  }
+
+  return htmlRows.join('');
 }
