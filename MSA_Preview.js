@@ -52,25 +52,32 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     MathJax = {
       tex: {
         // Use only LaTeX-native delimiters and correctly escape them for the JS string.
-        inlineMath: [['\\(', '\\)']],
-        displayMath: [['\\[', '\\]']],
+        inlineMath: [['\\\\(', '\\\\)']],
+        displayMath: [['\\\\[', '\\\\]']],
         processEscapes: true
       },
       svg: {
-        fontCache: 'global'
+        fontCache: 'global',
+        displayAlign: 'left',
+        displayIndent: '2em'
       }
     };
   </script>
   <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; }
-    .page-container { background-color: #fff; padding: 40px; margin: 20px; max-width: 800px; width: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    .page-container { background-color: #fff; padding: 40px; margin: 20px; max-width: 900px; width: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
     hr { margin: 2em 0; }
-    .row { display: flex; align-items: flex-start; margin-bottom: 0.5em; }
-    .main { flex: 1; padding-right: 15px; }
-    .mark { width: 100px; text-align: right; color: #555; font-style: italic; flex-shrink: 0; }
-    .method-heading { font-weight: bold; margin-top: 1em; }
-    .note-text { font-style: italic; font-size: 0.9em; }
+    .row { display: grid; grid-template-columns: 1fr 90px; column-gap: 18px; align-items: start; margin: 10px 0; }
+    .main { font-size: 15px; }
+    .mark { text-align: right; white-space: nowrap; color: #333; }
+    .mark .paren { font-style: italic; }
+    .mark .plain { font-style: normal; }
+    .row--heading .main { font-weight: 700; letter-spacing: 0.02em; }
+    .row--displaymath .mark { align-self: center; }
+    .row--equalsline .main { padding-left: 2.2em; }
+    .note-box { border: 1px solid #333; padding: 10px 12px; margin: 10px 0 12px 0; font-size: 0.95em; }
+    mjx-container[display="true"] { margin: 0.35em 0 !important; }
   </style>
 </head>
 <body>
@@ -99,11 +106,8 @@ function _sanitizeForMathJax_(text) {
   sanitized = sanitized.replace(/\\(A\d+|M\d+|R\d+|N\d+|AG)\b/g, '$1');
   sanitized = sanitized.replace(/\\(METHOD|NOTE|EITHER|OR|THEN)\b/g, '$1');
 
-  // Fix 2: Replace lone backslashes (often used as separators by OCR) with HTML line breaks.
-  // Handles ` \ ` between words.
-  sanitized = sanitized.replace(/ \s*\\ \s*/g, ' <br> ');
-  // Handles ` \` at the end of a line. The 'm' flag is for multiline matching.
-  sanitized = sanitized.replace(/ \s*\\\s*$/gm, '<br>');
+  // Force sum limits to appear above/below even in inline math.
+  sanitized = sanitized.replace(/(\\sum)(?!\\limits)/g, '$1\\limits');
 
   return sanitized;
 }
@@ -116,43 +120,36 @@ function _sanitizeForMathJax_(text) {
 function _buildStructuredHtmlFromText_(text) {
   if (!text) return "";
 
-  // Phase 1: Tokenize into a flat list of lines and display math blocks
+  // Phase 1: Tokenize safely by extracting display math first.
   const displayMathRegex = /(\\\[[\s\S]*?\\\])/g;
-  const textAndMathChunks = text.split(displayMathRegex);
-  let allTokens = [];
-  textAndMathChunks.forEach(chunk => {
-    if (!chunk || chunk.trim() === '') return;
-    if (chunk.startsWith('\\[') && chunk.endsWith('\\]')) {
-      allTokens.push({ type: 'display-math', content: chunk });
-    } else {
-      const lines = chunk.split(/\r?\n/);
-      lines.forEach(line => {
-        if (line.trim() !== '') { // Only push non-empty lines
-          allTokens.push({ type: 'text-line', content: line.trim() });
-        }
-      });
-    }
+  const displayMathBlocks = [];
+  const textWithPlaceholders = text.replace(displayMathRegex, (match) => {
+    displayMathBlocks.push(match);
+    return `\n@@MJX_BLOCK_${displayMathBlocks.length - 1}@@\n`;
   });
 
-  // Phase 2: Build rows using the "attach backward" logic
+  let allTokens = [];
+  textWithPlaceholders.split(/\r?\n/).forEach(line => {
+    if (line.trim() !== '') allTokens.push(line.trim());
+  });
+
+  // Phase 2: Build a structured row model using "attach backward" logic.
   const rows = [];
   const markRegex = /(\(\s*\b[AMRGN]\d+\b\s*\)|\b[AMRGN]\d+\b|\[\s*(?:Total\s*)?\d+\s*marks?\s*\]|AG|\(AG\))/g;
   const isMarkOnly = (line) => {
     if (!line) return false;
     const marks = line.match(markRegex);
     if (!marks) return false;
-    // Check if the line *only* contains marks and separators
     const stripped = line.replace(markRegex, '').replace(/[\s,;()]/g, '');
     return stripped === '';
   };
 
   for (let i = 0; i < allTokens.length; i++) {
-    const token = allTokens[i];
-    const content = token.content;
+    const line = allTokens[i];
 
-    // A) Handle mark-only tokens by attaching them backward
-    if (token.type === 'text-line' && isMarkOnly(content)) {
-      const marks = content.match(markRegex) || [];
+    // A) Handle mark-only lines by attaching them to the previous markable row.
+    if (isMarkOnly(line)) {
+      const marks = line.match(markRegex) || [];
       let lastMarkableRow = null;
       for (let j = rows.length - 1; j >= 0; j--) {
         if (rows[j].isMarkable) {
@@ -160,59 +157,61 @@ function _buildStructuredHtmlFromText_(text) {
           break;
         }
       }
-      if (lastMarkableRow) {
-        lastMarkableRow.marks.push(...marks);
-      }
-      // If no previous markable row, these marks are effectively dropped.
+      if (lastMarkableRow) lastMarkableRow.marks.push(...marks);
       continue;
     }
 
-    // B) Handle multi-line Note boxes
-    if (token.type === 'text-line' && /^Note:/i.test(content)) {
-      let noteContent = [content];
-      // Consume subsequent text-line tokens for the note
-      while (i + 1 < allTokens.length && allTokens[i + 1].type === 'text-line') {
-        const nextLine = allTokens[i + 1].content;
-        // Stop if the next line is a new part, a method, or a mark-only line
+    // B) Handle multi-line Note boxes.
+    if (/^Note:/i.test(line)) {
+      let noteContent = [line];
+      while (i + 1 < allTokens.length) {
+        const nextLine = allTokens[i + 1];
         if (/^\s*\(?[a-z]\)/i.test(nextLine) || /^METHOD/i.test(nextLine) || isMarkOnly(nextLine)) {
           break;
         }
-        i++; // Consume the token
-        noteContent.push(allTokens[i].content);
+        i++;
+        noteContent.push(allTokens[i]);
       }
       rows.push({
         main: `<div class="note-box">${noteContent.join('<br>')}</div>`,
         marks: [],
         type: 'note',
-        isMarkable: true // Notes can have marks attached to them
+        isMarkable: true
       });
       continue;
     }
 
-    // C) Handle content tokens
-    let main = content;
+    // C) Handle all other content lines.
+    let main = line;
     let currentMarks = [];
 
-    if (token.type === 'text-line') {
-      main = main.replace(markRegex, (match) => {
-        currentMarks.push(match.trim());
-        return '';
-      }).trim();
+    // Extract any marks from the line itself.
+    main = main.replace(markRegex, (match) => {
+      currentMarks.push(match.trim());
+      return '';
+    }).trim();
+
+    const newRow = { main: main, marks: currentMarks, type: 'text', isMarkable: true };
+
+    // Re-substitute display math placeholders.
+    if (/^@@MJX_BLOCK_\d+@@$/.test(main)) {
+      const blockIndex = parseInt(main.match(/@@MJX_BLOCK_(\d+)@@/)[1], 10);
+      newRow.main = displayMathBlocks[blockIndex];
+      newRow.type = 'display-math';
+      if (newRow.main.trim().startsWith('\\[=')) {
+        newRow.type = 'equals-line';
+      }
     }
-    
-    const newRow = { main: main, marks: currentMarks, type: token.type, isMarkable: true };
 
     if (/^METHOD\s+\d+$/i.test(main)) {
       newRow.type = 'heading';
       newRow.isMarkable = false;
-    } else if (token.type === 'display-math' && main.trim().startsWith('\\[=')) {
-      newRow.type = 'equals-line';
     }
     
     rows.push(newRow);
   }
 
-  // Phase 3: Render HTML
+  // Phase 3: Render the final HTML from the structured row model.
   return rows.map(row => {
     let rowClasses = ['row'];
     if (row.type === 'heading') { rowClasses.push('row--heading'); }
