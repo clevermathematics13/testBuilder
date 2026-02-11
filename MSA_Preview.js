@@ -66,18 +66,28 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
   <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; }
-    .page-container { background-color: #fff; padding: 40px; margin: 20px; max-width: 900px; width: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    .page-container { background-color: #fff; padding: 40px; margin: 20px; max-width: 950px; width: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
     hr { margin: 2em 0; }
-    .row { display: grid; grid-template-columns: 1fr 90px; column-gap: 18px; align-items: start; margin: 10px 0; }
+    .row {
+      display: grid;
+      grid-template-columns: 110px 1fr 90px; /* method | main | marks */
+      column-gap: 18px;
+      align-items: start;
+      margin: 8px 0;
+    }
+    .row--new-part { margin-top: 1.8em; }
+    .method-label { font-weight: 700; text-align: left; padding-top: 1px; }
     .main { font-size: 15px; }
+    .main .part { margin-right: 25px; }
+    .main .subpart { margin-right: 20px; }
     .mark { text-align: right; white-space: nowrap; color: #333; }
     .mark .paren { font-style: italic; }
     .mark .plain { font-style: normal; }
-    .row--heading .main { font-weight: 700; letter-spacing: 0.02em; }
     .row--displaymath .mark { align-self: center; }
+    .row--displaymath .method-label { align-self: center; }
     .row--equalsline .main { padding-left: 2.2em; }
     .note-box { border: 1px solid #333; padding: 10px 12px; margin: 10px 0 12px 0; font-size: 0.95em; }
-    mjx-container[display="true"] { margin: 0.35em 0 !important; }
+    mjx-container[display="true"] { margin: 0.3em 0 !important; }
   </style>
 </head>
 <body>
@@ -144,46 +154,66 @@ function _buildStructuredHtmlFromText_(text) {
     return stripped === '';
   };
 
+  let pendingMethod = null;
+
   for (let i = 0; i < allTokens.length; i++) {
     const line = allTokens[i];
 
-    // A) Handle mark-only lines by attaching them to the previous markable row.
+    // A) Handle METHOD headings by setting a pending label.
+    const methodMatch = line.match(/^METHOD\s+(\d+)$/i);
+    if (methodMatch) {
+      pendingMethod = `METHOD ${methodMatch[1]}`;
+      continue;
+    }
+
+    // B) Handle mark-only lines by attaching them to the previous markable row.
     if (isMarkOnly(line)) {
       const marks = line.match(markRegex) || [];
       let lastMarkableRow = null;
       for (let j = rows.length - 1; j >= 0; j--) {
-        if (rows[j].isMarkable) {
-          lastMarkableRow = rows[j];
-          break;
-        }
+        if (rows[j].isMarkable) { lastMarkableRow = rows[j]; break; }
       }
       if (lastMarkableRow) lastMarkableRow.marks.push(...marks);
       continue;
     }
 
-    // B) Handle multi-line Note boxes.
+    // C) Handle multi-line Note boxes.
     if (/^Note:/i.test(line)) {
       let noteContent = [line];
       while (i + 1 < allTokens.length) {
         const nextLine = allTokens[i + 1];
-        if (/^\s*\(?[a-z]\)/i.test(nextLine) || /^METHOD/i.test(nextLine) || isMarkOnly(nextLine)) {
-          break;
-        }
+        if (/^\s*\(?[a-z]\)/i.test(nextLine) || /^METHOD/i.test(nextLine) || isMarkOnly(nextLine)) break;
         i++;
         noteContent.push(allTokens[i]);
       }
       rows.push({
         main: `<div class="note-box">${noteContent.join('<br>')}</div>`,
         marks: [],
+        partLabels: [],
+        methodLabel: pendingMethod,
         type: 'note',
         isMarkable: true
       });
+      pendingMethod = null;
       continue;
     }
 
-    // C) Handle all other content lines.
+    // D) Handle all other content lines.
     let main = line;
     let currentMarks = [];
+    let partLabels = [];
+    let isNewMainPart = false;
+
+    // Extract part labels
+    const partRegex = /^\s*((?:\(\s*[a-z]\s*\)\s*)+)/i;
+    const partMatch = main.match(partRegex);
+    if (partMatch) {
+      partLabels = partMatch[1].match(/\(.*?\)/g) || [];
+      main = main.substring(partMatch[0].length).trim();
+      if (partLabels.length > 0 && /^\([b-z]\)$/i.test(partLabels[0])) {
+        isNewMainPart = true;
+      }
+    }
 
     // Extract any marks from the line itself.
     main = main.replace(markRegex, (match) => {
@@ -191,21 +221,23 @@ function _buildStructuredHtmlFromText_(text) {
       return '';
     }).trim();
 
-    const newRow = { main: main, marks: currentMarks, type: 'text', isMarkable: true };
+    const newRow = {
+      main: main,
+      marks: currentMarks,
+      partLabels: partLabels,
+      methodLabel: pendingMethod,
+      type: 'text',
+      isMarkable: true,
+      isNewMainPart: isNewMainPart
+    };
+    pendingMethod = null;
 
     // Re-substitute display math placeholders.
     if (/^@@MJX_BLOCK_\d+@@$/.test(main)) {
       const blockIndex = parseInt(main.match(/@@MJX_BLOCK_(\d+)@@/)[1], 10);
       newRow.main = displayMathBlocks[blockIndex];
       newRow.type = 'display-math';
-      if (newRow.main.trim().startsWith('\\[=')) {
-        newRow.type = 'equals-line';
-      }
-    }
-
-    if (/^METHOD\s+\d+$/i.test(main)) {
-      newRow.type = 'heading';
-      newRow.isMarkable = false;
+      if (newRow.main.trim().startsWith('\\[=')) newRow.type = 'equals-line';
     }
     
     rows.push(newRow);
@@ -214,16 +246,26 @@ function _buildStructuredHtmlFromText_(text) {
   // Phase 3: Render the final HTML from the structured row model.
   return rows.map(row => {
     let rowClasses = ['row'];
-    if (row.type === 'heading') { rowClasses.push('row--heading'); }
+    if (row.methodLabel) { rowClasses.push('row--with-method'); }
+    if (row.isNewMainPart) { rowClasses.push('row--new-part'); }
     if (row.type === 'display-math' || row.type === 'equals-line') { rowClasses.push('row--displaymath'); }
     if (row.type === 'equals-line') { rowClasses.push('row--equalsline'); }
     if (row.type === 'note') { rowClasses.push('row--note'); }
+
+    const methodLabelHtml = `<div class="method-label">${row.methodLabel || ''}</div>`;
+
+    const partLabelsHtml = (row.partLabels || []).map((label, index) => {
+      const className = index === 0 ? 'part' : 'subpart';
+      return `<span class="${className}">${label}</span>`;
+    }).join('');
 
     const marksHtml = row.marks.map(m => {
       const type = m.startsWith('(') ? 'paren' : 'plain';
       return `<div><span class="${type}">${m}</span></div>`;
     }).join('');
 
-    return `<div class="${rowClasses.join(' ')}"><div class="main">${row.main}</div><div class="mark">${marksHtml}</div></div>`;
+    const mainContentHtml = `<div class="main">${partLabelsHtml}${row.main}</div>`;
+
+    return `<div class="${rowClasses.join(' ')}">${methodLabelHtml}${mainContentHtml}<div class="mark">${marksHtml}</div></div>`;
   }).join('');
 }
