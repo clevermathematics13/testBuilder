@@ -187,21 +187,47 @@ function _getOcrPages(docId) {
         }
       }
 
-      const uniqueLines = new Set();
+      const allLines = [];
       regions.forEach((region, index) => {
         msaLog_(`Page ${page.page} - Scanning tile ${index + 1}/${regions.length}: x:${region.top_left_x}, y:${region.top_left_y}, w:${region.width}, h:${region.height}`);
-        const tileOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { region: region });
-        if (tileOcr && tileOcr.text && tileOcr.text.trim() !== '') {
-          msaLog_(`   > Tile ${index + 1} found text length: ${tileOcr.text.length}. First 50 chars: "${tileOcr.text.substring(0,50).replace(/\n/g, ' ')}"`);
-          tileOcr.text.split('\n').forEach(line => {
-            if (line.trim() !== '') uniqueLines.add(line.trim());
+        const tileOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { region: region, include_line_data: true });
+        
+        if (tileOcr && tileOcr.line_data && tileOcr.line_data.length > 0) {
+          msaLog_(`   > Tile ${index + 1} found ${tileOcr.line_data.length} lines.`);
+          tileOcr.line_data.forEach(line => {
+            if (!line.p1 || !line.p3) return; // Skip lines without coordinate data
+            const y_center = (line.p1.y + line.p3.y) / 2;
+            allLines.push({
+              text: line.text,
+              abs_y: y_center + region.top_left_y
+            });
           });
         } else {
-          msaLog_(`   > Tile ${index + 1} found no text.`);
+          msaLog_(`   > Tile ${index + 1} found no text lines.`);
         }
       });
 
-      const combinedText = Array.from(uniqueLines).join('\n');
+      if (allLines.length === 0) {
+        msaWarn_(`Page ${page.page}: Tiling strategy found no lines across all tiles.`);
+      }
+
+      allLines.sort((a, b) => a.abs_y - b.abs_y);
+
+      const finalLines = [];
+      const Y_THRESHOLD = 8; // pixels. If y-centers are within this, lines are at the same height.
+
+      for (const currentLine of allLines) {
+        const lastPushedLine = finalLines.length > 0 ? finalLines[finalLines.length - 1] : null;
+        if (lastPushedLine && Math.abs(currentLine.abs_y - lastPushedLine.abs_y) < Y_THRESHOLD) {
+          if (currentLine.text.length > lastPushedLine.text.length) {
+            finalLines[finalLines.length - 1] = currentLine; // Replace with the more complete line
+          }
+        } else {
+          finalLines.push(currentLine); // Add as a new distinct line
+        }
+      }
+
+      const combinedText = finalLines.map(l => l.text).join('\n');
       msaLog_(`Page ${page.page}: Tiling strategy produced combined text length: ${combinedText.length}`);
       ocrPages.push({
         page: page.page,
