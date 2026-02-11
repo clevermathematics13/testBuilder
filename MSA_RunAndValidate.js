@@ -143,101 +143,125 @@ function _getOcrPages(docId) {
   const ocrPages = [];
 
   if (pages.length > 0) {
+    // Helper function to calculate Intersection over Union for bounding boxes
+    const calculateIoU = (boxA, boxB) => {
+      const xA = Math.max(boxA.x1, boxB.x1);
+      const yA = Math.max(boxA.y1, boxB.y1);
+      const xB = Math.min(boxA.x2, boxB.x2);
+      const yB = Math.min(boxA.y2, boxB.y2);
+      const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+      if (interArea === 0) return 0;
+      const boxAArea = (boxA.x2 - boxA.x1) * (boxA.y2 - boxA.y1);
+      const boxBArea = (boxB.x2 - boxB.x1) * (boxB.y2 - boxB.y1);
+      const iou = interArea / (boxAArea + boxBArea - interArea);
+      return iou;
+    };
+
     for (let p = 0; p < pages.length; p++) {
       const page = pages[p];
-      msaLog_(`Page ${page.page} - Applying Drastic Tiling OCR.`);
-
       if (!page.width || !page.height) {
-        msaErr_(`Page ${page.page} is missing width/height dimensions. Cannot perform tiling OCR. Skipping page.`);
+        msaErr_(`Page ${page.page} is missing width/height dimensions. Skipping OCR.`);
         continue;
       }
 
-      const GRID_SIZE = 3; 
-      const OVERLAP = 0.15; 
-      const tileWidthPercent = 1 / GRID_SIZE;
-      const tileHeightPercent = 1 / GRID_SIZE;
-      const regions = [];
+      // --- Pass 1: Full-page OCR for structure ---
+      msaLog_(`Page ${page.page} - Pass 1: Full-page OCR for structure.`);
+      const baseOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { include_line_data: true });
+      const baseLines = ((baseOcr && baseOcr.line_data) || []).map(line => {
+        if (!line.cnt || line.cnt.length < 4) return null;
+        const xs = line.cnt.map(p => p[0]);
+        const ys = line.cnt.map(p => p[1]);
+        return {
+          text: line.text,
+          bbox: { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) }
+        };
+      }).filter(Boolean);
 
-      for (let row = 0; row < GRID_SIZE; row++) {
-        for (let col = 0; col < GRID_SIZE; col++) {
-          const xPercent = col * tileWidthPercent;
-          const yPercent = row * tileHeightPercent;
-          const overlapXPercent = tileWidthPercent * OVERLAP;
-          const overlapYPercent = tileHeightPercent * OVERLAP;
+      // --- Analyze for suspicious regions to re-scan ---
+      const regionsToRescan = [];
+      const avgLineHeight = baseLines.length > 0 ? baseLines.reduce((sum, line) => sum + (line.bbox.y2 - line.bbox.y1), 0) / baseLines.length : 20;
+      baseLines.sort((a, b) => a.bbox.y1 - b.bbox.y1);
 
-          const regionPercent = {
-            top_left_x: Math.max(0, xPercent - overlapXPercent),
-            top_left_y: Math.max(0, yPercent - overlapYPercent),
-            width: tileWidthPercent + (2 * overlapXPercent),
-            height: tileHeightPercent + (2 * overlapYPercent)
-          };
-
-          if (regionPercent.top_left_x + regionPercent.width > 1) regionPercent.width = 1 - regionPercent.top_left_x;
-          if (regionPercent.top_left_y + regionPercent.height > 1) regionPercent.height = 1 - regionPercent.top_left_y;
-
-          // Convert percentage-based region to absolute pixel values for the API
-          const regionPixels = {
-            top_left_x: Math.floor(regionPercent.top_left_x * page.width),
-            top_left_y: Math.floor(regionPercent.top_left_y * page.height),
-            width: Math.ceil(regionPercent.width * page.width),
-            height: Math.ceil(regionPercent.height * page.height)
-          };
-
-          regions.push(regionPixels);
+      // Vertical Gaps
+      for (let i = 0; i < baseLines.length - 1; i++) {
+        const gap = baseLines[i + 1].bbox.y1 - baseLines[i].bbox.y2;
+        if (gap > avgLineHeight * 1.5) {
+          regionsToRescan.push({ top_left_x: 0, top_left_y: baseLines[i].bbox.y2, width: page.width, height: gap, _reason: 'vertical_gap' });
         }
       }
 
-      const allLines = [];
-      regions.forEach((region, index) => {
-        msaLog_(`Page ${page.page} - Scanning tile ${index + 1}/${regions.length}: x:${region.top_left_x}, y:${region.top_left_y}, w:${region.width}, h:${region.height}`);
+      // Margins & Footer
+      if (baseLines.length > 0) {
+        const contentBox = {
+          x1: Math.min(...baseLines.map(l => l.bbox.x1)),
+          x2: Math.max(...baseLines.map(l => l.bbox.x2)),
+          y2: Math.max(...baseLines.map(l => l.bbox.y2))
+        };
+        if (page.width - contentBox.x2 > 50) { // Right Margin
+          regionsToRescan.push({ top_left_x: contentBox.x2, top_left_y: 0, width: page.width - contentBox.x2, height: page.height, _reason: 'right_margin' });
+        }
+        if (page.height - contentBox.y2 > avgLineHeight) { // Footer
+          regionsToRescan.push({ top_left_x: 0, top_left_y: contentBox.y2, width: page.width, height: page.height - contentBox.y2, _reason: 'footer' });
+        }
+      }
+
+      // --- Pass 2: Targeted OCR on suspicious regions ---
+      const supplementalLines = [];
+      msaLog_(`Page ${page.page} - Pass 2: Scanning ${regionsToRescan.length} suspicious regions.`);
+      regionsToRescan.forEach(region => {
         const tileOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { region: region, include_line_data: true });
-        
-        if (tileOcr && tileOcr.line_data && tileOcr.line_data.length > 0) {
-          msaLog_(`   > Tile ${index + 1} found ${tileOcr.line_data.length} lines.`);
+        if (tileOcr && tileOcr.line_data) {
           tileOcr.line_data.forEach(line => {
-            // The regional OCR returns coordinates in a 'cnt' array: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-            if (line.cnt && line.cnt.length >= 3 && line.cnt[0].length === 2 && line.cnt[2].length === 2) {
-              const y1 = line.cnt[0][1]; // y-coordinate of the first point
-              const y3 = line.cnt[2][1]; // y-coordinate of the third point
-              const y_center = (y1 + y3) / 2;
-              allLines.push({
-                text: line.text,
-                abs_y: y_center + region.top_left_y // Add the tile's y-offset to get absolute y
-              });
-            }
+            if (!line.cnt || line.cnt.length < 4) return;
+            const xs = line.cnt.map(p => p[0] + region.top_left_x);
+            const ys = line.cnt.map(p => p[1] + region.top_left_y);
+            supplementalLines.push({
+              text: line.text,
+              bbox: { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) }
+            });
           });
-        } else {
-          msaLog_(`   > Tile ${index + 1} found no text lines.`);
         }
       });
 
-      if (allLines.length === 0) {
-        msaWarn_(`Page ${page.page}: Tiling strategy found no lines across all tiles.`);
-      }
-
-      allLines.sort((a, b) => a.abs_y - b.abs_y);
-
-      const finalLines = [];
-      const Y_THRESHOLD = 8; // pixels. If y-centers are within this, lines are at the same height.
-
-      for (const currentLine of allLines) {
-        const lastPushedLine = finalLines.length > 0 ? finalLines[finalLines.length - 1] : null;
-        if (lastPushedLine && Math.abs(currentLine.abs_y - lastPushedLine.abs_y) < Y_THRESHOLD) {
-          if (currentLine.text.length > lastPushedLine.text.length) {
-            finalLines[finalLines.length - 1] = currentLine; // Replace with the more complete line
+      // --- Merge, Deduplicate, and Reconstruct ---
+      const finalLines = [...baseLines];
+      supplementalLines.forEach(supLine => {
+        let isDuplicate = false;
+        for (const baseLine of finalLines) {
+          if (calculateIoU(supLine.bbox, baseLine.bbox) > 0.3) {
+            isDuplicate = true;
+            break;
           }
-        } else {
-          finalLines.push(currentLine); // Add as a new distinct line
         }
-      }
+        if (!isDuplicate) {
+          // Fragment Killer Rule: drop very short lines that are just digits/punctuation or substrings of nearby lines
+          const isShortFragment = supLine.text.length <= 4 && /^[0-9\s()×+=-.,]+$/.test(supLine.text);
+          let isSubstringOfNeighbor = false;
+          for (const baseLine of finalLines) {
+            if (Math.abs(supLine.bbox.y1 - baseLine.bbox.y1) < avgLineHeight && baseLine.text.includes(supLine.text)) {
+              isSubstringOfNeighbor = true;
+              break;
+            }
+          }
+
+          if (isShortFragment || isSubstringOfNeighbor) {
+            msaLog_(`   > Fragment killer dropped: "${supLine.text}"`);
+          } else {
+            finalLines.push(supLine);
+          }
+        }
+      });
+
+      // Final sort by reading order (y, then x)
+      finalLines.sort((a, b) => a.bbox.y1 - b.bbox.y1 || a.bbox.x1 - b.bbox.x1);
 
       const combinedText = finalLines.map(l => l.text).join('\n');
-      msaLog_(`Page ${page.page}: Tiling strategy produced combined text length: ${combinedText.length}`);
+      msaLog_(`Page ${page.page}: Hybrid strategy produced combined text length: ${combinedText.length} from ${finalLines.length} final lines.`);
       ocrPages.push({
         page: page.page,
         fileName: page.fileName,
         fileId: page.fileId,
-        request_id: "tiling_strategy",
+        request_id: "hybrid_strategy",
         confidence: null,
         latex_styled: combinedText,
         text: combinedText,
