@@ -141,7 +141,7 @@ function _getOcrPages(docId) {
   const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
   const pages = msaExtractPageImagesFromDoc_(cfg, docId, folder);
   const ocrPages = [];
-
+  
   if (pages.length > 0) {
     // Helper function to calculate Intersection over Union for bounding boxes
     const calculateIoU = (boxA, boxB) => {
@@ -153,96 +153,88 @@ function _getOcrPages(docId) {
       if (interArea === 0) return 0;
       const boxAArea = (boxA.x2 - boxA.x1) * (boxA.y2 - boxA.y1);
       const boxBArea = (boxB.x2 - boxB.x1) * (boxB.y2 - boxB.y1);
-      const iou = interArea / (boxAArea + boxBArea - interArea);
-      return iou;
+      return interArea / (boxAArea + boxBArea - interArea);
     };
 
-    for (let p = 0; p < pages.length; p++) {
-      const page = pages[p];
+    for (const page of pages) {
       if (!page.width || !page.height) {
         msaErr_(`Page ${page.page} is missing width/height dimensions. Skipping OCR.`);
         continue;
       }
 
-      // --- Pass 1: Full-page OCR for structure ---
+      // --- Pass 1: Full-page OCR for structure (the "spine") ---
       msaLog_(`Page ${page.page} - Pass 1: Full-page OCR for structure.`);
       const baseOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { include_line_data: true });
       const baseLines = ((baseOcr && baseOcr.line_data) || []).map(line => {
         if (!line.cnt || line.cnt.length < 4) return null;
         const xs = line.cnt.map(p => p[0]);
         const ys = line.cnt.map(p => p[1]);
-        return {
-          text: line.text,
-          bbox: { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) }
-        };
+        return { text: line.text, bbox: { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) } };
       }).filter(Boolean);
 
-      // --- Analyze for suspicious regions to re-scan ---
+      // --- Analyze for weak regions to re-scan ---
       const regionsToRescan = [];
       const avgLineHeight = baseLines.length > 0 ? baseLines.reduce((sum, line) => sum + (line.bbox.y2 - line.bbox.y1), 0) / baseLines.length : 20;
       baseLines.sort((a, b) => a.bbox.y1 - b.bbox.y1);
 
-      // Vertical Gaps
+      // Find large vertical gaps between text blocks
       for (let i = 0; i < baseLines.length - 1; i++) {
         const gap = baseLines[i + 1].bbox.y1 - baseLines[i].bbox.y2;
-        if (gap > avgLineHeight * 1.5) {
+        if (gap > avgLineHeight * 1.5) { // If gap is > 1.5x average line height
           regionsToRescan.push({ top_left_x: 0, top_left_y: baseLines[i].bbox.y2, width: page.width, height: gap, _reason: 'vertical_gap' });
         }
       }
 
-      // Margins & Footer
+      // Define content box to find margins
       if (baseLines.length > 0) {
         const contentBox = {
           x1: Math.min(...baseLines.map(l => l.bbox.x1)),
           x2: Math.max(...baseLines.map(l => l.bbox.x2)),
           y2: Math.max(...baseLines.map(l => l.bbox.y2))
         };
-        if (page.width - contentBox.x2 > 50) { // Right Margin
+        // Full-height right margin band
+        if (page.width - contentBox.x2 > 50) {
           regionsToRescan.push({ top_left_x: contentBox.x2, top_left_y: 0, width: page.width - contentBox.x2, height: page.height, _reason: 'right_margin' });
         }
-        if (page.height - contentBox.y2 > avgLineHeight) { // Footer
+        // Full-width bottom band (footer)
+        if (page.height - contentBox.y2 > avgLineHeight) {
           regionsToRescan.push({ top_left_x: 0, top_left_y: contentBox.y2, width: page.width, height: page.height - contentBox.y2, _reason: 'footer' });
         }
       }
 
-      // --- Pass 2: Targeted OCR on suspicious regions ---
+      // --- Pass 2: Targeted OCR on weak regions ---
       const supplementalLines = [];
-      msaLog_(`Page ${page.page} - Pass 2: Scanning ${regionsToRescan.length} suspicious regions.`);
+      msaLog_(`Page ${page.page} - Pass 2: Scanning ${regionsToRescan.length} weak regions.`);
       regionsToRescan.forEach(region => {
+        // Ensure region has positive dimensions
+        if (region.width <= 0 || region.height <= 0) return;
+        msaLog_(`   > Scanning region: ${region._reason} (w:${Math.round(region.width)}, h:${Math.round(region.height)})`);
         const tileOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { region: region, include_line_data: true });
         if (tileOcr && tileOcr.line_data) {
           tileOcr.line_data.forEach(line => {
             if (!line.cnt || line.cnt.length < 4) return;
+            // Convert tile-local coordinates to absolute page coordinates
             const xs = line.cnt.map(p => p[0] + region.top_left_x);
             const ys = line.cnt.map(p => p[1] + region.top_left_y);
-            supplementalLines.push({
-              text: line.text,
-              bbox: { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) }
-            });
+            supplementalLines.push({ text: line.text, bbox: { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) } });
           });
         }
       });
 
-      // --- Merge, Deduplicate, and Reconstruct ---
+      // --- Merge, Deduplicate, and Reconstruct Final Text ---
       const finalLines = [...baseLines];
       supplementalLines.forEach(supLine => {
-        let isDuplicate = false;
-        for (const baseLine of finalLines) {
-          if (calculateIoU(supLine.bbox, baseLine.bbox) > 0.3) {
-            isDuplicate = true;
-            break;
-          }
-        }
+        // Check if this supplemental line is already represented by a base line
+        const isDuplicate = finalLines.some(baseLine => calculateIoU(supLine.bbox, baseLine.bbox) > 0.3);
+
         if (!isDuplicate) {
-          // Fragment Killer Rule: drop very short lines that are just digits/punctuation or substrings of nearby lines
+          // Fragment Killer Rule: drop very short lines that are just digits/punctuation,
+          // or are substrings of a nearby line. This prevents noise.
           const isShortFragment = supLine.text.length <= 4 && /^[0-9\s()×+=-.,]+$/.test(supLine.text);
-          let isSubstringOfNeighbor = false;
-          for (const baseLine of finalLines) {
-            if (Math.abs(supLine.bbox.y1 - baseLine.bbox.y1) < avgLineHeight && baseLine.text.includes(supLine.text)) {
-              isSubstringOfNeighbor = true;
-              break;
-            }
-          }
+          const isSubstringOfNeighbor = finalLines.some(baseLine =>
+            Math.abs(supLine.bbox.y1 - baseLine.bbox.y1) < avgLineHeight &&
+            baseLine.text.includes(supLine.text)
+          );
 
           if (isShortFragment || isSubstringOfNeighbor) {
             msaLog_(`   > Fragment killer dropped: "${supLine.text}"`);
@@ -252,7 +244,7 @@ function _getOcrPages(docId) {
         }
       });
 
-      // Final sort by reading order (y, then x)
+      // Final sort by reading order (top-to-bottom, then left-to-right)
       finalLines.sort((a, b) => a.bbox.y1 - b.bbox.y1 || a.bbox.x1 - b.bbox.x1);
 
       const combinedText = finalLines.map(l => l.text).join('\n');
@@ -261,14 +253,15 @@ function _getOcrPages(docId) {
         page: page.page,
         fileName: page.fileName,
         fileId: page.fileId,
-        request_id: "hybrid_strategy",
-        confidence: null,
+        request_id: "hybrid_strategy_v2", // Mark as new version
+        confidence: null, // Confidence is mixed, so set to null
         latex_styled: combinedText,
         text: combinedText,
-        data: []
+        data: [] // Data field is complex, safe to clear it
       });
     }
   } else {
+    // Fallback for docs with no images: extract text directly
     const directPages = msaExtractTextFromDocDirectly_(docId);
     directPages.forEach(p => ocrPages.push(p));
   }
