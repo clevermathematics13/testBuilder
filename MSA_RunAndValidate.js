@@ -235,7 +235,7 @@ function _getOcrPages(docId) {
           const verticalGap = line2_y_min - line1_y_max;
 
           const avgLineHeight = Math.abs(lineData[0].p4.y - lineData[0].p1.y);
-          const GAP_THRESHOLD_MULTIPLIER = 1.8; // Increased threshold to avoid noise
+          const GAP_THRESHOLD_MULTIPLIER = 1.5; // Re-tuned threshold
 
           if (verticalGap > (avgLineHeight * GAP_THRESHOLD_MULTIPLIER)) {
             pass2_regions_to_scan.push({
@@ -249,17 +249,46 @@ function _getOcrPages(docId) {
         }
       }
 
+      // Heuristic Scan: Look for inequalities that might be missing a final integer answer.
+      if (lineData.length > 0 && page.width && page.height) {
+        for (let i = 0; i < lineData.length; i++) {
+          const line = lineData[i];
+          if (line.text && (line.text.includes('>') || line.text.includes('<'))) {
+            // Found an inequality. Check if the next line is missing or not an integer assignment.
+            const nextLine = lineData[i + 1];
+            const hasIntegerAnswerFollowing = nextLine && nextLine.text && /n\s*[=≥]\s*\d+/.test(nextLine.text);
+
+            if (!hasIntegerAnswerFollowing) {
+              msaLog_(`Page ${page.page} - Heuristic: Inequality found without clear integer answer. Scanning below.`);
+              const y_start = Math.max(line.p3.y, line.p4.y);
+              const scan_height = (Math.abs(line.p4.y - line.p1.y) || 20) * 3; // Scan 3 line heights below
+              pass2_regions_to_scan.push({
+                top_left_x: 0,
+                top_left_y: y_start / page.height,
+                width: 1,
+                height: scan_height / page.height,
+                _reason: `heuristic_inequality_check`
+              });
+            }
+          }
+        }
+      }
+
       // Scan margins and footer for missed content like (M1) or n=335
       if (lineData.length > 0 && page.width && page.height) {
-        let min_x = page.width, max_x = 0, max_y = 0;
+        let max_y = 0;
+        const all_x_ends = [];
         lineData.forEach(line => {
-          min_x = Math.min(min_x, line.p1.x, line.p4.x);
-          max_x = Math.max(max_x, line.p2.x, line.p3.x);
           max_y = Math.max(max_y, line.p3.y, line.p4.y);
+          all_x_ends.push(line.p2.x, line.p3.x);
         });
 
+        // Use 95th percentile for main content width to be robust against outliers.
+        all_x_ends.sort((a, b) => a - b);
+        const max_x = all_x_ends[Math.floor(all_x_ends.length * 0.95)] || (page.width * 0.8);
+
         const avgLineHeight = Math.abs(lineData[0].p4.y - lineData[0].p1.y);
-        const MARGIN_WIDTH_THRESHOLD = 75; // pixels
+        const MARGIN_WIDTH_THRESHOLD = 50; // pixels
         const FOOTER_HEIGHT_THRESHOLD = avgLineHeight * 1.5;
 
         // Right Margin (most common for marks)
@@ -284,6 +313,12 @@ function _getOcrPages(docId) {
           });
         }
       }
+
+      // --- Log Regions and Execute Scans ---
+      msaLog_(`Page ${page.page}: Found ${pass2_regions_to_scan.length} potential regions for Pass 2 scan.`);
+      pass2_regions_to_scan.forEach(region => {
+        msaLog_(`  - Region for reason: ${region._reason}, y: ${region.top_left_y.toFixed(2)}, h: ${region.height.toFixed(2)}, x: ${region.top_left_x.toFixed(2)}, w: ${region.width.toFixed(2)}`);
+      });
 
       // --- Execute Pass 2 Scans ---
       const pass2_ocrs = [];
