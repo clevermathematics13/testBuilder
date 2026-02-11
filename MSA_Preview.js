@@ -70,7 +70,7 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     hr { margin: 2em 0; }
     .row {
       display: grid;
-      grid-template-columns: 40px 1fr 90px; /* primary-part | main | marks */
+      grid-template-columns: 40px 1fr 90px; /* primary-part | main-content | marks */
       column-gap: 18px;
       align-items: start;
       margin: 8px 0;
@@ -78,7 +78,7 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     .row--new-part { margin-top: 1.8em; }
     .primary-part-label { text-align: left; }
     .main { font-size: 15px; }
-    .secondary-part-label { display: inline-block; width: 40px; }
+    .secondary-part-label { display: inline-block; width: 45px; }
     .mark { text-align: right; white-space: nowrap; color: #333; }
     .mark .paren { font-style: italic; }
     .mark .plain { font-style: normal; }
@@ -206,22 +206,30 @@ function _buildStructuredHtmlFromText_(text) {
     let secondaryPart = '';
     let isNewMainPart = false;
 
-    // Extract part labels
-    const partRegex = /^\s*((?:\(\s*[a-zivx]+\s*\)\s*)+)/i;
-    const partMatch = main.match(partRegex);
-    if (partMatch) {
-      const allParts = partMatch[1].match(/\(.*?\)/g) || [];
-      main = main.substring(partMatch[0].length).trim();
-      allParts.forEach(part => {
-        if (/^\(\s*[a-z]\s*\)$/i.test(part)) {
-          primaryPart = part;
-        } else if (/^\(\s*[ivx]+\s*\)$/i.test(part)) {
-          secondaryPart = part;
-        }
-      });
+    // Extract primary part label, e.g., (a), (b)
+    const primaryPartRegex = /^\s*(\(\s*[a-z]\s*\))/i;
+    const primaryMatch = main.match(primaryPartRegex);
+    if (primaryMatch) {
+      primaryPart = primaryMatch[1];
+      main = main.substring(primaryMatch[0].length).trim();
       if (primaryPart && /^\([b-z]\)$/i.test(primaryPart)) {
         isNewMainPart = true;
       }
+    }
+
+    // Extract secondary part label from the remaining text, e.g., (i), (ii)
+    const secondaryPartRegex = /^\s*(\(\s*[ivx]+\s*\))/i;
+    const secondaryMatch = main.match(secondaryPartRegex);
+    if (secondaryMatch) {
+      secondaryPart = secondaryMatch[1];
+      main = main.substring(secondaryMatch[0].length).trim();
+    }
+
+    // If no primary part was found on this line, but a secondary one was,
+    // it implies we are continuing the previous primary part.
+    if (!primaryPart && secondaryPart) {
+      // This space is intentional to keep the main content aligned.
+      primaryPart = '&nbsp;';
     }
 
     // Extract any marks from the line itself.
