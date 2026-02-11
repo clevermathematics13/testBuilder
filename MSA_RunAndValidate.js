@@ -147,33 +147,49 @@ function _getOcrPages(docId) {
       const page = pages[p];
       msaLog_(`Page ${page.page} - Applying Drastic Tiling OCR.`);
 
+      if (!page.width || !page.height) {
+        msaErr_(`Page ${page.page} is missing width/height dimensions. Cannot perform tiling OCR. Skipping page.`);
+        continue;
+      }
+
       const GRID_SIZE = 3; 
       const OVERLAP = 0.15; 
-      const tileWidth = 1 / GRID_SIZE;
-      const tileHeight = 1 / GRID_SIZE;
+      const tileWidthPercent = 1 / GRID_SIZE;
+      const tileHeightPercent = 1 / GRID_SIZE;
       const regions = [];
 
       for (let row = 0; row < GRID_SIZE; row++) {
         for (let col = 0; col < GRID_SIZE; col++) {
-          const x = col * tileWidth;
-          const y = row * tileHeight;
-          const overlapX = tileWidth * OVERLAP;
-          const overlapY = tileHeight * OVERLAP;
-          const region = {
-            top_left_x: Math.max(0, x - overlapX),
-            top_left_y: Math.max(0, y - overlapY),
-            width: tileWidth + (2 * overlapX),
-            height: tileHeight + (2 * overlapY)
+          const xPercent = col * tileWidthPercent;
+          const yPercent = row * tileHeightPercent;
+          const overlapXPercent = tileWidthPercent * OVERLAP;
+          const overlapYPercent = tileHeightPercent * OVERLAP;
+
+          const regionPercent = {
+            top_left_x: Math.max(0, xPercent - overlapXPercent),
+            top_left_y: Math.max(0, yPercent - overlapYPercent),
+            width: tileWidthPercent + (2 * overlapXPercent),
+            height: tileHeightPercent + (2 * overlapYPercent)
           };
-          if (region.top_left_x + region.width > 1) region.width = 1 - region.top_left_x;
-          if (region.top_left_y + region.height > 1) region.height = 1 - region.top_left_y;
-          regions.push(region);
+
+          if (regionPercent.top_left_x + regionPercent.width > 1) regionPercent.width = 1 - regionPercent.top_left_x;
+          if (regionPercent.top_left_y + regionPercent.height > 1) regionPercent.height = 1 - regionPercent.top_left_y;
+
+          // Convert percentage-based region to absolute pixel values for the API
+          const regionPixels = {
+            top_left_x: Math.floor(regionPercent.top_left_x * page.width),
+            top_left_y: Math.floor(regionPercent.top_left_y * page.height),
+            width: Math.ceil(regionPercent.width * page.width),
+            height: Math.ceil(regionPercent.height * page.height)
+          };
+
+          regions.push(regionPixels);
         }
       }
 
       const uniqueLines = new Set();
       regions.forEach((region, index) => {
-        msaLog_(`Page ${page.page} - Scanning tile ${index + 1}/${regions.length}: x:${region.top_left_x.toFixed(2)}, y:${region.top_left_y.toFixed(2)}, w:${region.width.toFixed(2)}, h:${region.height.toFixed(2)}`);
+        msaLog_(`Page ${page.page} - Scanning tile ${index + 1}/${regions.length}: x:${region.top_left_x}, y:${region.top_left_y}, w:${region.width}, h:${region.height}`);
         const tileOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { region: region });
         if (tileOcr && tileOcr.text && tileOcr.text.trim() !== '') {
           msaLog_(`   > Tile ${index + 1} found text length: ${tileOcr.text.length}. First 50 chars: "${tileOcr.text.substring(0,50).replace(/\n/g, ' ')}"`);
