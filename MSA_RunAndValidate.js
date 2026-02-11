@@ -218,7 +218,7 @@ function _getOcrPages(docId) {
       msaLog_(`Page ${page.page} Mathpix: latex_styled length=${(pass1_ocr.latex_styled || "").length}, text length=${(pass1_ocr.text || "").length}`);
 
       // --- PASS 2: Suspicious Gap Detection & Re-OCR ---
-      const pass2_texts = [];
+      const pass2_regions_to_scan = [];
       let lineData = pass1_ocr.line_data || [];
 
       // Defensively filter lineData to ensure all elements have the required point structure.
@@ -226,52 +226,94 @@ function _getOcrPages(docId) {
         lineData = lineData.filter(line => line && line.p1 && line.p2 && line.p3 && line.p4);
       }
 
+      // Scan for large vertical gaps between lines
       if (lineData.length > 1 && page.width && page.height) {
         lineData.sort((a, b) => a.p1.y - b.p1.y);
-
         for (let i = 0; i < lineData.length - 1; i++) {
           const line1_y_max = Math.max(lineData[i].p3.y, lineData[i].p4.y);
           const line2_y_min = Math.min(lineData[i + 1].p1.y, lineData[i + 1].p2.y);
           const verticalGap = line2_y_min - line1_y_max;
 
           const avgLineHeight = Math.abs(lineData[0].p4.y - lineData[0].p1.y);
-          const GAP_THRESHOLD_MULTIPLIER = 1.5;
+          const GAP_THRESHOLD_MULTIPLIER = 1.8; // Increased threshold to avoid noise
 
           if (verticalGap > (avgLineHeight * GAP_THRESHOLD_MULTIPLIER)) {
-            msaLog_(`Page ${page.page} - Pass 2: Suspicious gap of ${verticalGap.toFixed(0)}px found. Re-scanning region.`);
-
-            const region = {
+            pass2_regions_to_scan.push({
               top_left_x: 0,
               top_left_y: line1_y_max / page.height,
               width: 1,
-              height: verticalGap / page.height
-            };
-
-            if (region.top_left_y < 0 || region.top_left_y >= 1 || region.height <= 0) continue;
-            region.height = Math.min(region.height, 1 - region.top_left_y);
-
-            const pass2_options = { region: region };
-            const pass2_ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, pass2_options);
-            // 🟢 DEBUG LOGGING START
-            msaLog_(`Page ${page.page} Pass 2 OCR Response (raw): ${JSON.stringify(pass2_ocr).substring(0, 500)}`);
-            // 🟢 DEBUG LOGGING END
-
-            if (pass2_ocr && pass2_ocr.text && pass2_ocr.text.trim() !== '') {
-              msaLog_(`Page ${page.page} - Pass 2: Found additional text: "${pass2_ocr.text.trim().substring(0, 50)}..."`);
-              pass2_texts.push(pass2_ocr.text);
-            }
+              height: verticalGap / page.height,
+              _reason: `vertical_gap (${verticalGap.toFixed(0)}px)`
+            });
           }
         }
       }
 
+      // Scan margins and footer for missed content like (M1) or n=335
+      if (lineData.length > 0 && page.width && page.height) {
+        let min_x = page.width, max_x = 0, max_y = 0;
+        lineData.forEach(line => {
+          min_x = Math.min(min_x, line.p1.x, line.p4.x);
+          max_x = Math.max(max_x, line.p2.x, line.p3.x);
+          max_y = Math.max(max_y, line.p3.y, line.p4.y);
+        });
+
+        const avgLineHeight = Math.abs(lineData[0].p4.y - lineData[0].p1.y);
+        const MARGIN_WIDTH_THRESHOLD = 75; // pixels
+        const FOOTER_HEIGHT_THRESHOLD = avgLineHeight * 1.5;
+
+        // Right Margin (most common for marks)
+        if ((page.width - max_x) > MARGIN_WIDTH_THRESHOLD) {
+          pass2_regions_to_scan.push({
+            top_left_x: max_x / page.width,
+            top_left_y: 0,
+            width: (page.width - max_x) / page.width,
+            height: 1,
+            _reason: "right_margin"
+          });
+        }
+
+        // Footer
+        if ((page.height - max_y) > FOOTER_HEIGHT_THRESHOLD) {
+          pass2_regions_to_scan.push({
+            top_left_x: 0,
+            top_left_y: max_y / page.height,
+            width: 1,
+            height: (page.height - max_y) / page.height,
+            _reason: "footer"
+          });
+        }
+      }
+
+      // --- Execute Pass 2 Scans ---
+      const pass2_ocrs = [];
+      pass2_regions_to_scan.forEach(region => {
+        // Validate region before scanning
+        if (region.top_left_y < 0 || region.top_left_y >= 1 || region.height <= 0.01) return;
+        region.height = Math.min(region.height, 1 - region.top_left_y);
+
+        msaLog_(`Page ${page.page} - Pass 2: Scanning region for reason: ${region._reason}`);
+        const pass2_options = { region: { top_left_x: region.top_left_x, top_left_y: region.top_left_y, width: region.width, height: region.height } };
+        const pass2_ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, pass2_options);
+
+        if (pass2_ocr && pass2_ocr.text && pass2_ocr.text.trim() !== '') {
+          msaLog_(`Page ${page.page} - Pass 2: Found additional text: "${pass2_ocr.text.trim().substring(0, 50)}..."`);
+          pass2_ocrs.push(pass2_ocr);
+        }
+      });
+
       // --- Combine Results ---
       let combinedText = pass1_ocr.text || "";
       let combinedLatex = pass1_ocr.latex_styled || "";
-      if (pass2_texts.length > 0) {
-        const additionalText = pass2_texts.join("\n\n");
+      if (pass2_ocrs.length > 0) {
+        // Join the text and latex_styled content from the second passes.
+        // Fallback to .text if .latex_styled is missing.
+        const additionalText = pass2_ocrs.map(o => o.text || "").join("\n\n");
+        const additionalLatex = pass2_ocrs.map(o => o.latex_styled || o.text || "").join("\n\n");
+
         combinedText += "\n\n" + additionalText;
-        combinedLatex += "\n\n" + additionalText; // Append to latex_styled as well for preview
-        msaLog_(`Page ${page.page}: Appended text from Pass 2.`);
+        combinedLatex += "\n\n" + additionalLatex;
+        msaLog_(`Page ${page.page}: Appended content from ${pass2_ocrs.length} Pass 2 scans.`);
       }
 
       ocrPages.push({
