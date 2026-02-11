@@ -70,15 +70,14 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     hr { margin: 2em 0; }
     .row {
       display: grid;
-      grid-template-columns: 1fr 90px; /* main | marks */
+      grid-template-columns: 80px 1fr 90px; /* parts | main | marks */
       column-gap: 18px;
       align-items: start;
       margin: 8px 0;
     }
     .row--new-part { margin-top: 1.8em; }
+    .part-labels { text-align: left; }
     .main { font-size: 15px; }
-    .main .part { margin-right: 25px; }
-    .main .subpart { margin-right: 20px; }
     .mark { text-align: right; white-space: nowrap; color: #333; }
     .mark .paren { font-style: italic; }
     .mark .plain { font-style: normal; }
@@ -206,7 +205,7 @@ function _buildStructuredHtmlFromText_(text) {
     let isNewMainPart = false;
 
     // Extract part labels
-    const partRegex = /^\s*((?:\(\s*[a-z]\s*\)\s*)+)/i;
+    const partRegex = /^\s*((?:\(\s*[a-zivx]+\s*\)\s*)+)/i;
     const partMatch = main.match(partRegex);
     if (partMatch) {
       partLabels = partMatch[1].match(/\(.*?\)/g) || [];
@@ -251,18 +250,16 @@ function _buildStructuredHtmlFromText_(text) {
     if (row.type === 'equals-line') { rowClasses.push('row--equalsline'); }
     if (row.type === 'note') { rowClasses.push('row--note'); }
 
-    const partLabelsHtml = (row.partLabels || []).map((label, index) => {
-      const className = index === 0 ? 'part' : 'subpart';
-      return `<span class="${className}">${label}</span>`;
-    }).join('');
+    const partLabelsHtml = (row.partLabels || []).join(' ');
+    const partLabelsDiv = `<div class="part-labels">${partLabelsHtml}</div>`;
 
     const marksHtml = row.marks.map(m => {
       const type = m.startsWith('(') ? 'paren' : 'plain';
       return `<div><span class="${type}">${m}</span></div>`;
     }).join('');
 
-    const mainContentHtml = `<div class="main">${partLabelsHtml}${row.main}</div>`;
+    const mainContentDiv = `<div class="main">${row.main}</div>`;
 
-    return `<div class="${rowClasses.join(' ')}">${mainContentHtml}<div class="mark">${marksHtml}</div></div>`;
+    return `<div class="${rowClasses.join(' ')}">${partLabelsDiv}${mainContentDiv}<div class="mark">${marksHtml}</div></div>`;
   }).join('');
 }
