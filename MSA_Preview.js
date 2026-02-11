@@ -29,15 +29,11 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
       return _buildStructuredHtmlFromText_(sanitized);
     }
 
-    // If no renderable content was found, fall back to displaying the raw text in a formatted block.
-    const rawText = p.text || p.latex_styled || ''; // Prefer .text as it seems more reliable
-    const escapedText = rawText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-    return `
-      <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; border-radius: 5px; margin-bottom: 1em; font-family: monospace;">
-        <p style="margin-top: 0; font-weight: bold; font-size: 0.9em; color: #6c757d; font-family: sans-serif;">NOTE: Math rendering is not available for this content. Displaying raw text.</p>
-        <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0;"><code>${escapedText}</code></pre>
-      </div>`;
+    // If no renderable content was found, attempt to format the raw text anyway.
+    // This handles cases like manually corrected text that lacks LaTeX delimiters.
+    const rawText = p.text || p.latex_styled || '';
+    const sanitized = _sanitizeForMathJax_(rawText);
+    return _buildStructuredHtmlFromText_(sanitized);
   }).join('<hr style="border-top: 1px dashed #ccc;">');
   // HTML template that includes the MathJax library to render LaTeX.
   const html = `
