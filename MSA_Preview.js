@@ -162,7 +162,8 @@ function _buildStructuredHtmlFromText_(text) {
       rows.push({
         main: `METHOD ${methodMatch[1]}`,
         marks: [],
-        partLabels: [],
+        primaryPart: '',
+        secondaryPart: '&nbsp;', // Use a non-breaking space to force indent span
         type: 'heading',
         isMarkable: false
       });
