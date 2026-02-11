@@ -134,7 +134,7 @@ function runMSA_VR_One(docId) {
 }
 
 /**
- * UPDATED: Uses Drastic Tiling Strategy for OCR
+ * UPDATED: Uses a Hybrid OCR Strategy
  */
 function _getOcrPages(docId) {
   const cfg = msaGetConfig_();
