@@ -210,7 +210,7 @@ function _getOcrPages(docId) {
 
       // --- PASS 1: Initial Full-Page OCR ---
       msaLog_(`Page ${page.page} - Pass 1: Full page OCR`);
-      const pass1_options = { "data_options": { "include_line_data": true } };
+      const pass1_options = { "include_line_data": true };
       const pass1_ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, pass1_options);
       // 🟢 DEBUG LOGGING START
       msaLog_(`Page ${page.page} Pass 1 OCR Response (raw): ${JSON.stringify(pass1_ocr).substring(0, 500)}`);
