@@ -9,13 +9,14 @@ function msaGetMathpixCreds_() {
   };
 }
 
-function msaMathpixOCR_(imageBlob) {
+function msaMathpixOCR_(imageBlob, requestOptions) {
   const creds = msaGetMathpixCreds_();
 
   const url = "https://api.mathpix.com/v3/text";
   const payload = {
     src: "data:" + imageBlob.getContentType() + ";base64," + Utilities.base64Encode(imageBlob.getBytes()),
-    formats: MSA_MATHPIX_FORMATS
+    formats: MSA_MATHPIX_FORMATS,
+    ...requestOptions
   };
 
   const options = {

@@ -260,14 +260,17 @@ function msaExtractPageImagesFromDoc_(cfg, docId, folder) {
   var results = [];
   
   for (var i = 0; i < images.length; i++) {
-    var blob = images[i].getBlob();
+    var image = images[i];
+    var blob = image.getBlob();
     var name = "page_" + (i + 1) + ".png";
     blob.setName(name);
     var file = folder.createFile(blob);
     results.push({
       page: i + 1,
       fileName: name,
-      fileId: file.getId()
+      fileId: file.getId(),
+      width: image.getWidth(),
+      height: image.getHeight()
     });
   }
   
@@ -284,7 +287,7 @@ function msaMathpixOcrFromDriveImage_(fileId, cfg, options) {
   var blob = file.getBlob();
   
   // Call the actual Mathpix logic defined in MSA_Mathpix.gs
-  return msaMathpixOCR_(blob);
+  return msaMathpixOCR_(blob, options);
 }
 
 function msaBuildCombinedOcr_(cfg, docId, folder, ocrPages) {

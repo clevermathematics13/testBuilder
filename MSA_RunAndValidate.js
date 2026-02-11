@@ -197,12 +197,75 @@ function _getOcrPages(docId) {
   const pages = msaExtractPageImagesFromDoc_(cfg, docId, folder);
   msaLog_("Extracted page-like images: " + pages.length);
   const ocrPages = [];
+
   if (pages.length > 0) {
     for (let p = 0; p < pages.length; p++) {
       const page = pages[p];
-      const ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, {});
-      msaLog_(`Page ${page.page} Mathpix: latex_styled length=${(ocr.latex_styled || "").length}, text length=${(ocr.text || "").length}`);
-      ocrPages.push({ page: page.page, fileName: page.fileName, fileId: page.fileId, request_id: ocr.request_id || "", confidence: typeof ocr.confidence === "number" ? ocr.confidence : null, latex_styled: ocr.latex_styled || "", text: ocr.text || "" });
+
+      // --- PASS 1: Initial Full-Page OCR ---
+      msaLog_(`Page ${page.page} - Pass 1: Full page OCR`);
+      const pass1_options = { "data_options": { "include_line_data": true } };
+      const pass1_ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, pass1_options);
+      msaLog_(`Page ${page.page} Mathpix: latex_styled length=${(pass1_ocr.latex_styled || "").length}, text length=${(pass1_ocr.text || "").length}`);
+
+      // --- PASS 2: Suspicious Gap Detection & Re-OCR ---
+      const pass2_texts = [];
+      const lineData = pass1_ocr.line_data || [];
+      if (lineData.length > 1 && page.width && page.height) {
+        lineData.sort((a, b) => a.p1.y - b.p1.y);
+
+        for (let i = 0; i < lineData.length - 1; i++) {
+          const line1_y_max = Math.max(lineData[i].p3.y, lineData[i].p4.y);
+          const line2_y_min = Math.min(lineData[i + 1].p1.y, lineData[i + 1].p2.y);
+          const verticalGap = line2_y_min - line1_y_max;
+
+          const avgLineHeight = Math.abs(lineData[0].p4.y - lineData[0].p1.y);
+          const GAP_THRESHOLD_MULTIPLIER = 1.5;
+
+          if (verticalGap > (avgLineHeight * GAP_THRESHOLD_MULTIPLIER)) {
+            msaLog_(`Page ${page.page} - Pass 2: Suspicious gap of ${verticalGap.toFixed(0)}px found. Re-scanning region.`);
+
+            const region = {
+              top_left_x: 0,
+              top_left_y: line1_y_max / page.height,
+              width: 1,
+              height: verticalGap / page.height
+            };
+
+            if (region.top_left_y < 0 || region.top_left_y >= 1 || region.height <= 0) continue;
+            region.height = Math.min(region.height, 1 - region.top_left_y);
+
+            const pass2_options = { region: region };
+            const pass2_ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, pass2_options);
+
+            if (pass2_ocr && pass2_ocr.text && pass2_ocr.text.trim() !== '') {
+              msaLog_(`Page ${page.page} - Pass 2: Found additional text: "${pass2_ocr.text.trim().substring(0, 50)}..."`);
+              pass2_texts.push(pass2_ocr.text);
+            }
+          }
+        }
+      }
+
+      // --- Combine Results ---
+      let combinedText = pass1_ocr.text || "";
+      let combinedLatex = pass1_ocr.latex_styled || "";
+      if (pass2_texts.length > 0) {
+        const additionalText = pass2_texts.join("\n\n");
+        combinedText += "\n\n" + additionalText;
+        combinedLatex += "\n\n" + additionalText; // Append to latex_styled as well for preview
+        msaLog_(`Page ${page.page}: Appended text from Pass 2.`);
+      }
+
+      ocrPages.push({
+        page: page.page,
+        fileName: page.fileName,
+        fileId: page.fileId,
+        request_id: pass1_ocr.request_id || "",
+        confidence: typeof pass1_ocr.confidence === "number" ? pass1_ocr.confidence : null,
+        latex_styled: combinedLatex,
+        text: combinedText,
+        data: pass1_ocr.data || []
+      });
     }
   } else {
     const directPages = msaExtractTextFromDocDirectly_(docId);
