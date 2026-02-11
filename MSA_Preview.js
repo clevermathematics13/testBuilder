@@ -70,14 +70,15 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     hr { margin: 2em 0; }
     .row {
       display: grid;
-      grid-template-columns: 80px 1fr 90px; /* parts | main | marks */
+      grid-template-columns: 40px 1fr 90px; /* primary-part | main | marks */
       column-gap: 18px;
       align-items: start;
       margin: 8px 0;
     }
     .row--new-part { margin-top: 1.8em; }
-    .part-labels { text-align: left; }
+    .primary-part-label { text-align: left; }
     .main { font-size: 15px; }
+    .secondary-part-label { display: inline-block; width: 40px; }
     .mark { text-align: right; white-space: nowrap; color: #333; }
     .mark .paren { font-style: italic; }
     .mark .plain { font-style: normal; }
@@ -201,16 +202,24 @@ function _buildStructuredHtmlFromText_(text) {
     // D) Handle all other content lines.
     let main = line;
     let currentMarks = [];
-    let partLabels = [];
+    let primaryPart = '';
+    let secondaryPart = '';
     let isNewMainPart = false;
 
     // Extract part labels
     const partRegex = /^\s*((?:\(\s*[a-zivx]+\s*\)\s*)+)/i;
     const partMatch = main.match(partRegex);
     if (partMatch) {
-      partLabels = partMatch[1].match(/\(.*?\)/g) || [];
+      const allParts = partMatch[1].match(/\(.*?\)/g) || [];
       main = main.substring(partMatch[0].length).trim();
-      if (partLabels.length > 0 && /^\([b-z]\)$/i.test(partLabels[0])) {
+      allParts.forEach(part => {
+        if (/^\(\s*[a-z]\s*\)$/i.test(part)) {
+          primaryPart = part;
+        } else if (/^\(\s*[ivx]+\s*\)$/i.test(part)) {
+          secondaryPart = part;
+        }
+      });
+      if (primaryPart && /^\([b-z]\)$/i.test(primaryPart)) {
         isNewMainPart = true;
       }
     }
@@ -224,7 +233,8 @@ function _buildStructuredHtmlFromText_(text) {
     const newRow = {
       main: main,
       marks: currentMarks,
-      partLabels: partLabels,
+      primaryPart: primaryPart,
+      secondaryPart: secondaryPart,
       type: 'text',
       isMarkable: true,
       isNewMainPart: isNewMainPart
@@ -250,16 +260,17 @@ function _buildStructuredHtmlFromText_(text) {
     if (row.type === 'equals-line') { rowClasses.push('row--equalsline'); }
     if (row.type === 'note') { rowClasses.push('row--note'); }
 
-    const partLabelsHtml = (row.partLabels || []).join(' ');
-    const partLabelsDiv = `<div class="part-labels">${partLabelsHtml}</div>`;
+    const primaryPartDiv = `<div class="primary-part-label">${row.primaryPart || ''}</div>`;
 
     const marksHtml = row.marks.map(m => {
       const type = m.startsWith('(') ? 'paren' : 'plain';
       return `<div><span class="${type}">${m}</span></div>`;
     }).join('');
+    const marksDiv = `<div class="mark">${marksHtml}</div>`;
 
-    const mainContentDiv = `<div class="main">${row.main}</div>`;
+    const secondaryPartSpan = row.secondaryPart ? `<span class="secondary-part-label">${row.secondaryPart}</span>` : '';
+    const mainContentDiv = `<div class="main">${secondaryPartSpan}${row.main}</div>`;
 
-    return `<div class="${rowClasses.join(' ')}">${partLabelsDiv}${mainContentDiv}<div class="mark">${marksHtml}</div></div>`;
+    return `<div class="${rowClasses.join(' ')}">${primaryPartDiv}${mainContentDiv}${marksDiv}</div>`;
   }).join('');
 }
