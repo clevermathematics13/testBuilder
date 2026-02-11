@@ -173,15 +173,20 @@ function _getOcrPages(docId) {
 
       const uniqueLines = new Set();
       regions.forEach((region, index) => {
+        msaLog_(`Page ${page.page} - Scanning tile ${index + 1}/${regions.length}: x:${region.top_left_x.toFixed(2)}, y:${region.top_left_y.toFixed(2)}, w:${region.width.toFixed(2)}, h:${region.height.toFixed(2)}`);
         const tileOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { region: region });
-        if (tileOcr && tileOcr.text) {
+        if (tileOcr && tileOcr.text && tileOcr.text.trim() !== '') {
+          msaLog_(`   > Tile ${index + 1} found text length: ${tileOcr.text.length}. First 50 chars: "${tileOcr.text.substring(0,50).replace(/\n/g, ' ')}"`);
           tileOcr.text.split('\n').forEach(line => {
             if (line.trim() !== '') uniqueLines.add(line.trim());
           });
+        } else {
+          msaLog_(`   > Tile ${index + 1} found no text.`);
         }
       });
 
       const combinedText = Array.from(uniqueLines).join('\n');
+      msaLog_(`Page ${page.page}: Tiling strategy produced combined text length: ${combinedText.length}`);
       ocrPages.push({
         page: page.page,
         fileName: page.fileName,
