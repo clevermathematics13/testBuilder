@@ -187,12 +187,18 @@ function _getOcrPages(docId) {
         }
       }
 
+      let hasLoggedLineDataObject = false; // Add a flag to prevent log spam
       const allLines = [];
       regions.forEach((region, index) => {
         msaLog_(`Page ${page.page} - Scanning tile ${index + 1}/${regions.length}: x:${region.top_left_x}, y:${region.top_left_y}, w:${region.width}, h:${region.height}`);
         const tileOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { region: region, include_line_data: true });
         
         if (tileOcr && tileOcr.line_data && tileOcr.line_data.length > 0) {
+          if (!hasLoggedLineDataObject) {
+            msaLog_(`   > DIAGNOSTIC: First line object found: ${JSON.stringify(tileOcr.line_data[0])}`);
+            hasLoggedLineDataObject = true;
+          }
+
           msaLog_(`   > Tile ${index + 1} found ${tileOcr.line_data.length} lines.`);
           tileOcr.line_data.forEach(line => {
             if (!line.p1 || !line.p3) return; // Skip lines without coordinate data
