@@ -5,20 +5,18 @@
 function runMSA_VR_Batch() {
   msaLog_("=== MSA-VR (Validation & Repair) BATCH START ===");
 
-  // 🟢 PUT THE DOC IDs YOU WANT TO TEST HERE:
   const docIds = [
-    "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88", // 14M.2.AHL.TZ2.H_1
-    "1ogg4P9-_Q5-7GVgrtIbo355WjhYgoYs7Mjk0OOjO7Ho", // 22M.2.AHL.TZ2.H_7
-    "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4",  // 18M.1.SL.TZ2.S_5
-    "17VFlp49U15wcbOoSP7wNUdraz3TjElwYwyvavLErec8", // 22M.2.AHL.TZ2.H_6
-    "10JpdOR7L4xDl9gN0Ixckplf9kVLPTSmwRQ7cpeoQRdY" // 12M.1.AHL.TZ1.H_6
+    "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88",
+    "1ogg4P9-_Q5-7GVgrtIbo355WjhYgoYs7Mjk0OOjO7Ho",
+    "1zfGnVJHtGxrEGCVLR7PTsYFwcsbpyRU1aOcyO6MdNN4",
+    "17VFlp49U15wcbOoSP7wNUdraz3TjElwYwyvavLErec8",
+    "10JpdOR7L4xDl9gN0Ixckplf9kVLPTSmwRQ7cpeoQRdY"
   ];
 
   const cfg = msaGetConfig_();
   for (let i = 0; i < docIds.length; i++) {
     const docId = docIds[i];
 
-    // 🟢 NEW: Check if already reconciled and skip if so.
     if (msaCheckIfReconciled_(cfg, docId)) {
       msaLog_(`Skipping ${docId} - already marked as reconciled.`);
       continue;
@@ -34,33 +32,17 @@ function runMSA_VR_Batch() {
   msaLog_("=== MSA-VR (Validation & Repair) BATCH END ===");
 }
 
-/**
- * Entry point for the Web App UI.
- * Performs initial OCR and then runs the pipeline.
- * Returns a status object for the UI to handle.
- */
 function runMSA_VR_One_ForWebApp(docId) {
   const { ocrPages } = _getOcrPages(docId);
   return _runMsaPipeline(docId, ocrPages);
 }
 
-/**
- * The core pipeline logic, shared by initial runs and re-processing runs.
- * Takes OCR pages as input and performs all parsing, validation, and reporting.
- * Returns a status object for the UI.
- */
 function _runMsaPipeline(docId, ocrPages) {
-  // 🟢 DEBUG LOGGING START
   msaLog_(`_runMsaPipeline: Started for docId=${docId}. Received ${ocrPages.length} OCR pages.`);
-  if (ocrPages.length > 0) {
-    msaLog_(`_runMsaPipeline: First page text length: ${(ocrPages[0].text || "").length}`);
-  }
-  // 🟢 DEBUG LOGGING END
   const cfg = msaGetConfig_();
   const rules = msaLoadGradingRules_(cfg);
   const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
 
-  // Save combined OCR artifacts
   const combined = msaBuildCombinedOcr_(cfg, docId, folder, ocrPages);
   msaUpsertTextFile_(folder, "markscheme_ocr_combined.txt", combined.readable);
   msaUpsertJsonFile_(folder, "markscheme_ocr_combined.json", combined.json);
@@ -81,11 +63,11 @@ function _runMsaPipeline(docId, ocrPages) {
   const ocrByPage = {};
   ocrPages.forEach(p => { ocrByPage[p.page] = (p.text || "").split(/\r?\n/); });
 
-  // Run all passes...
   const rawPass1 = msaAtomizePass1_(ocrPages, rules.rules, null);
   const pass1 = { json: rawPass1, readable: JSON.stringify(rawPass1.points, null, 2) };
   const pass1Score = msaScorePointsOutput_(pass1.json, validation, cfg);
   const pass2ShouldRun = msaShouldTriggerPass2_(pass1.json, pass1Score, validation, cfg);
+  
   let pass2 = null;
   if (pass2ShouldRun.trigger) {
     const rawPass2 = msaAtomizerPass2_(pass1.json, ocrByPage);
@@ -96,25 +78,21 @@ function _runMsaPipeline(docId, ocrPages) {
   const pass3 = { json: rawPass3, readable: JSON.stringify(rawPass3.points, null, 2) };
   const best = msaPickBestOutput_(pass1, pass2, pass3, validation, cfg);
 
-  // Save all artifacts...
   msaUpsertJsonFile_(folder, "markscheme_points_pass1.json", rawPass1);
   if (pass2) msaUpsertJsonFile_(folder, "markscheme_points_pass2.json", pass2.json);
   msaUpsertJsonFile_(folder, "markscheme_points_pass3.json", rawPass3);
   msaUpsertJsonFile_(folder, "markscheme_points_best.json", best.best.json);
   msaUpsertTextFile_(folder, "markscheme_points_best_readable.txt", best.best.readable);
 
-  // Also update the preview HTML file based on the corrected/processed OCR data.
   msaWritePreviewArtifacts_(cfg, docId, folder, combined, ocrPages);
 
-  // Final validation and return status
   const extractedScoreInfo = msaCalculateTotalPossibleScore_(best.best.json.points);
   const officialTotal = officialTotalMarks;
   const extractedTotal = extractedScoreInfo.total;
 
   if (officialTotal !== null && extractedTotal !== officialTotal) {
-    // 🟢 NEW: Delete marker file on discrepancy to ensure it can be re-processed.
     msaDeleteFileIfExists_(folder, "_RECONCILED.txt");
-    const result = {
+    return {
       status: 'NEEDS_REVIEW',
       doc_id: docId,
       doc_title: validation.doc_title,
@@ -122,697 +100,155 @@ function _runMsaPipeline(docId, ocrPages) {
       calculatedTotal: extractedTotal,
       ocrText: combined.readable,
       folderUrl: folder.getUrl(),
-      ocrPages: ocrPages, // Pass the full structure for correction
+      ocrPages: ocrPages,
       pass1_points: rawPass1.points.length,
-      pass1_warnings: rawPass1.warnings.length,
-      pass2_points: pass2 ? pass2.json.points.length : null,
-      pass2_warnings: pass2 ? pass2.json.warnings.length : null,
-      pass3_points: rawPass3.points.length,
-      pass3_warnings: rawPass3.warnings.length,
       best_pass: best.bestPass,
-      best_points: best.best.json.points.length,
       score_breakdown: extractedScoreInfo.breakdown
     };
-    return result;
   } else {
-    // 🟢 NEW: Create marker file on success.
     if (officialTotal !== null) msaUpsertTextFile_(folder, "_RECONCILED.txt", `Reconciled on: ${new Date().toISOString()}`);
-    const result = {
+    return {
       status: 'SUCCESS',
       doc_id: docId,
       doc_title: validation.doc_title,
       officialTotal: officialTotal,
       calculatedTotal: extractedTotal,
-      pass1_points: rawPass1.points.length,
-      pass1_warnings: rawPass1.warnings.length,
-      pass2_points: pass2 ? pass2.json.points.length : null,
-      pass2_warnings: pass2 ? pass2.json.warnings.length : null,
-      pass3_points: rawPass3.points.length,
-      pass3_warnings: rawPass3.warnings.length,
       best_pass: best.bestPass,
-      best_points: best.best.json.points.length,
       score_breakdown: extractedScoreInfo.breakdown
     };
-    return result;
   }
 }
 
 function runMSA_VR_One(docId) {
   const t0 = Date.now();
-  msaLog_("=== MSA-VR (Validation & Repair) START === docId=" + docId);
+  msaLog_("=== MSA-VR START === docId=" + docId);
   const { ocrPages, folder } = _getOcrPages(docId);
-
-  // Run the core pipeline and log the results for the non-UI batch runner.
   const result = _runMsaPipeline(docId, ocrPages);
 
-  // Summary logs
-  msaLog_("DONE ✅ Folder: " + folder.getName());
-  msaLog_("Pass1 points: " + result.pass1_points + " (warnings: " + result.pass1_warnings + ")");
-  if (result.pass2_points !== null) msaLog_("Pass2 points: " + result.pass2_points + " (warnings: " + result.pass2_warnings + ")");
-  msaLog_("Pass3 points: " + result.pass3_points + " (warnings: " + result.pass3_warnings + ")");
-  msaLog_("BEST = " + result.best_pass + " points=" + result.best_points);
-
-  // 🟢 NEW: Explicitly log the final score validation check.
-  msaLog_("--- TOTAL SCORE VALIDATION ---");
-  const officialTotal = result.officialTotal;
-  const extractedTotal = result.calculatedTotal;
-  msaLog_("Official Total (from OCR text): " + (officialTotal !== null ? officialTotal : "Not Found"));
-  msaLog_("Extracted Total (calculated): " + extractedTotal);
+  msaLog_("BEST = " + result.best_pass + " Extracted Total: " + result.calculatedTotal);
   if (result.status === 'NEEDS_REVIEW') {
-    msaWarn_("Discrepancy found between official total (" + officialTotal + ") and extracted total (" + extractedTotal + ").");
-    msaWarn_("Calculation breakdown:");
-    (result.score_breakdown || []).forEach(line => msaWarn_("  -> " + line));
-  } else if (officialTotal !== null) {
-    msaLog_("✅ Totals reconciled.");
+    msaWarn_("Discrepancy: Official " + result.officialTotal + " vs Extracted " + result.calculatedTotal);
   }
-  msaLog_("------------------------------");
-
   const dt = Math.round((Date.now() - t0) / 1000);
-  msaLog_("=== MSA-VR (Validation & Repair) END === (duration " + dt + "s)");
+  msaLog_("=== MSA-VR END === (" + dt + "s)");
 }
 
 /**
- * Helper function to perform the initial OCR step.
- * Returns the OCR pages and the folder object.
+ * UPDATED: Uses Drastic Tiling Strategy for OCR
  */
 function _getOcrPages(docId) {
   const cfg = msaGetConfig_();
   const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
-
-  // Convert Doc -> images -> OCR
   const pages = msaExtractPageImagesFromDoc_(cfg, docId, folder);
-  msaLog_("Extracted page-like images: " + pages.length);
   const ocrPages = [];
 
   if (pages.length > 0) {
     for (let p = 0; p < pages.length; p++) {
       const page = pages[p];
+      msaLog_(`Page ${page.page} - Applying Drastic Tiling OCR.`);
 
-      // --- PASS 1: Initial Full-Page OCR ---
-      msaLog_(`Page ${page.page} - Pass 1: Full page OCR`);
-      const pass1_options = { "include_line_data": true };
-      const pass1_ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, pass1_options);
-      // 🟢 DEBUG LOGGING START
-      msaLog_(`Page ${page.page} Pass 1 OCR Response (raw): ${JSON.stringify(pass1_ocr).substring(0, 500)}`);
-      // 🟢 DEBUG LOGGING END
-      msaLog_(`Page ${page.page} Mathpix: latex_styled length=${(pass1_ocr.latex_styled || "").length}, text length=${(pass1_ocr.text || "").length}`);
+      const GRID_SIZE = 3; 
+      const OVERLAP = 0.15; 
+      const tileWidth = 1 / GRID_SIZE;
+      const tileHeight = 1 / GRID_SIZE;
+      const regions = [];
 
-      // --- PASS 2: Suspicious Gap Detection & Re-OCR ---
-      const pass2_regions_to_scan = [];
-      let lineData = pass1_ocr.line_data || [];
-
-      // Defensively filter lineData to ensure all elements have the required point structure.
-      if (lineData.length > 0) {
-        lineData = lineData.filter(line => line && line.p1 && line.p2 && line.p3 && line.p4);
-      }
-
-      // Sort lineData by y-coordinate for consistent processing
-      lineData.sort((a, b) => a.p1.y - b.p1.y);
-
-      // Calculate average line height for dynamic thresholds
-      // Default to 20px if no lines are found to prevent division by zero.
-      const avgLineHeight = lineData.length > 0 ?
-        lineData.reduce((sum, line) => sum + Math.abs(line.p4.y - line.p1.y), 0) / lineData.length :
-        20;
-
-      // Scan for large vertical gaps between lines
-      if (lineData.length > 1 && page.width && page.height) {
-        for (let i = 0; i < lineData.length - 1; i++) {
-          const line1_y_max = Math.max(lineData[i].p3.y, lineData[i].p4.y);
-          const line2_y_min = Math.min(lineData[i + 1].p1.y, lineData[i + 1].p2.y);
-          const verticalGap = line2_y_min - line1_y_max;
-          const GAP_THRESHOLD_MULTIPLIER = 1.5; // Re-tuned threshold
-
-          if (verticalGap > (avgLineHeight * GAP_THRESHOLD_MULTIPLIER)) {
-            pass2_regions_to_scan.push({
-              top_left_x: 0,
-              top_left_y: line1_y_max / page.height,
-              width: 1,
-              height: verticalGap / page.height,
-              _reason: `vertical_gap (${verticalGap.toFixed(0)}px between line ${i} and ${i + 1})`
-            });
-          }
+      for (let row = 0; row < GRID_SIZE; row++) {
+        for (let col = 0; col < GRID_SIZE; col++) {
+          const x = col * tileWidth;
+          const y = row * tileHeight;
+          const overlapX = tileWidth * OVERLAP;
+          const overlapY = tileHeight * OVERLAP;
+          const region = {
+            top_left_x: Math.max(0, x - overlapX),
+            top_left_y: Math.max(0, y - overlapY),
+            width: tileWidth + (2 * overlapX),
+            height: tileHeight + (2 * overlapY)
+          };
+          if (region.top_left_x + region.width > 1) region.width = 1 - region.top_left_x;
+          if (region.top_left_y + region.height > 1) region.height = 1 - region.top_left_y;
+          regions.push(region);
         }
       }
 
-      // Heuristic Scan: Look for inequalities that might be missing a final integer answer.
-      if (lineData.length > 0 && page.width && page.height && avgLineHeight > 0) {
-        for (let i = 0; i < lineData.length; i++) {
-          const line = lineData[i];
-          if (line.text && (line.text.includes('>') || line.text.includes('<'))) {
-            // Found an inequality. Check if the next line is missing or not an integer assignment.
-            const nextLine = lineData[i + 1];
-            const hasIntegerAnswerFollowing = nextLine && nextLine.text && /n\s*[=≥]\s*\d+(\.\d+)?/.test(nextLine.text);
-
-            if (!hasIntegerAnswerFollowing) {
-              msaLog_(`Page ${page.page} - Heuristic: Inequality found without clear integer answer. Scanning below.`);
-              const y_start = Math.max(line.p3.y, line.p4.y);
-              const scan_height = avgLineHeight * 3; // Scan 3 line heights below
-              pass2_regions_to_scan.push({
-                top_left_x: 0,
-                top_left_y: y_start / page.height,
-                width: 1,
-                height: scan_height / page.height,
-                _reason: `heuristic_inequality_check (below line ${i})`
-              });
-            }
-          }
-        }
-      }
-
-      // Scan margins and footer for missed content like (M1) or n=335
-      if (lineData.length > 0 && page.width && page.height && avgLineHeight > 0) {
-        let max_y = 0;
-        const all_x_ends = [];
-        lineData.forEach(line => {
-          max_y = Math.max(max_y, line.p3.y, line.p4.y);
-          all_x_ends.push(line.p2.x, line.p3.x);
-        });
-
-        // Use 90th percentile for main content width to be robust against outliers and allow wider margin scan.
-        all_x_ends.sort((a, b) => a - b); // Sort to find percentile
-        const main_content_max_x = all_x_ends.length > 0 ? all_x_ends[Math.floor(all_x_ends.length * 0.90)] : (page.width * 0.8);
-
-        const MARGIN_WIDTH_THRESHOLD = 70; // pixels - increased to capture more of the margin
-        const FOOTER_HEIGHT_THRESHOLD = avgLineHeight * 1.5;
-
-        // Right Margin (most common for marks)
-        if ((page.width - main_content_max_x) > MARGIN_WIDTH_THRESHOLD) {
-          pass2_regions_to_scan.push({
-            top_left_x: main_content_max_x / page.width,
-            top_left_y: 0,
-            width: (page.width - main_content_max_x) / page.width,
-            height: 1,
-            _reason: "right_margin"
+      const uniqueLines = new Set();
+      regions.forEach((region, index) => {
+        const tileOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { region: region });
+        if (tileOcr && tileOcr.text) {
+          tileOcr.text.split('\n').forEach(line => {
+            if (line.trim() !== '') uniqueLines.add(line.trim());
           });
-        }
-
-        // New: Left Margin (for very early marks or part labels)
-        const min_x = all_x_ends.length > 0 ? all_x_ends[Math.floor(all_x_ends.length * 0.10)] : (page.width * 0.2);
-        if (min_x > MARGIN_WIDTH_THRESHOLD) { // If there's a significant left margin
-          pass2_regions_to_scan.push({
-            top_left_x: 0,
-            top_left_y: 0,
-            width: min_x / page.width,
-            height: 1,
-            _reason: "left_margin"
-          });
-        }
-
-        // Footer
-        if ((page.height - max_y) > FOOTER_HEIGHT_THRESHOLD) {
-          pass2_regions_to_scan.push({
-            top_left_x: 0,
-            top_left_y: max_y / page.height,
-            width: 1,
-            height: (page.height - max_y) / page.height,
-            _reason: "footer"
-          });
-        }
-      }
-
-      // 4. New Heuristic: Isolated Small Elements Scan
-      // This aims to find small, isolated text/math elements that Mathpix detected
-      // but didn't group into a full 'line_data' entry.
-      const allElements = pass1_ocr.data || [];
-      if (allElements.length > 0 && page.width && page.height && avgLineHeight > 0) {
-        const MIN_ELEMENT_HEIGHT = avgLineHeight * 0.3; // e.g., 30% of avg line height
-        const MAX_ELEMENT_HEIGHT = avgLineHeight * 0.8; // e.g., 80% of avg line height
-        const MIN_ELEMENT_WIDTH = 10; // pixels
-        const OVERLAP_THRESHOLD = 0.5; // If >50% of element overlaps a line, it's not isolated.
-
-        allElements.forEach(element => {
-          // Ensure element has valid bounding box
-          if (!element.bbox || element.bbox.length !== 4) return;
-
-          const [x1, y1, x2, y2] = element.bbox;
-          const elementHeight = y2 - y1;
-          const elementWidth = x2 - x1;
-
-          // Filter for small, potentially isolated elements
-          if (elementHeight < MIN_ELEMENT_HEIGHT || elementHeight > MAX_ELEMENT_HEIGHT || elementWidth < MIN_ELEMENT_WIDTH) {
-            return;
-          }
-
-          // Check if this element significantly overlaps with any existing line_data
-          let isOverlappingWithLine = false;
-          for (const line of lineData) {
-            const line_x1 = Math.min(line.p1.x, line.p4.x);
-            const line_y1 = Math.min(line.p1.y, line.p2.y);
-            const line_x2 = Math.max(line.p2.x, line.p3.x);
-            const line_y2 = Math.max(line.p3.y, line.p4.y);
-
-            // Simple AABB overlap check
-            if (x1 < line_x2 && x2 > line_x1 && y1 < line_y2 && y2 > line_y1) {
-              // Calculate overlap area
-              const overlapX = Math.max(0, Math.min(x2, line_x2) - Math.max(x1, line_x1));
-              const overlapY = Math.max(0, Math.min(y2, line_y2) - Math.max(y1, line_y1));
-              const overlapArea = overlapX * overlapY;
-              const elementArea = elementWidth * elementHeight;
-
-              // If more than OVERLAP_THRESHOLD of the element overlaps with a line, consider it part of that line.
-              if (elementArea > 0 && overlapArea / elementArea > OVERLAP_THRESHOLD) {
-                isOverlappingWithLine = true;
-                break;
-              }
-            }
-          }
-
-          if (!isOverlappingWithLine) {
-            // This element is small and isolated. Define a region around it.
-            const padding_x = avgLineHeight * 0.5; // Add some padding around the element
-            const padding_y = avgLineHeight * 0.5;
-
-            const region_x1 = Math.max(0, x1 - padding_x);
-            const region_y1 = Math.max(0, y1 - padding_y);
-            const region_x2 = Math.min(page.width, x2 + padding_x);
-            const region_y2 = Math.min(page.height, y2 + padding_y);
-
-            pass2_regions_to_scan.push({
-              top_left_x: region_x1 / page.width,
-              top_left_y: region_y1 / page.height,
-              width: (region_x2 - region_x1) / page.width,
-              height: (region_y2 - region_y1) / page.height,
-              _reason: `isolated_element (${element.text || element.latex_styled || 'math'})`
-            });
-          }
-        });
-      }
-
-      // --- Log Regions and Execute Scans ---
-      msaLog_(`Page ${page.page}: Found ${pass2_regions_to_scan.length} potential regions for Pass 2 scan.`);
-      pass2_regions_to_scan.forEach(region => {
-        msaLog_(`  - Region for reason: ${region._reason}, y: ${region.top_left_y.toFixed(2)}, h: ${region.height.toFixed(2)}, x: ${region.top_left_x.toFixed(2)}, w: ${region.width.toFixed(2)}`);
-      });
-
-      // --- Execute Pass 2 Scans ---
-      const pass2_ocrs = [];
-      pass2_regions_to_scan.forEach(region => {
-        // Validate region before scanning
-        if (region.top_left_y < 0 || region.top_left_y >= 1 || region.height <= 0.01) return;
-        region.height = Math.min(region.height, 1 - region.top_left_y);
-
-        msaLog_(`Page ${page.page} - Pass 2: Scanning region for reason: ${region._reason}`);
-        const pass2_options = { region: { top_left_x: region.top_left_x, top_left_y: region.top_left_y, width: region.width, height: region.height } };
-        const pass2_ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, pass2_options);
-
-        if (pass2_ocr && pass2_ocr.text && pass2_ocr.text.trim() !== '') {
-          msaLog_(`Page ${page.page} - Pass 2: Found additional text: "${pass2_ocr.text.trim().substring(0, 50)}..."`);
-          pass2_ocrs.push(pass2_ocr);
         }
       });
 
-      // --- Combine Results ---
-      let combinedText = pass1_ocr.text || "";
-      let combinedLatex = pass1_ocr.latex_styled || "";
-      if (pass2_ocrs.length > 0) {
-        // Join the text and latex_styled content from the second passes.
-        // Fallback to .text if .latex_styled is missing.
-        const additionalText = pass2_ocrs.map(o => o.text || "").join("\n\n");
-        const additionalLatex = pass2_ocrs.map(o => o.latex_styled || o.text || "").join("\n\n");
-
-        combinedText += "\n\n" + additionalText;
-        combinedLatex += "\n\n" + additionalLatex;
-        msaLog_(`Page ${page.page}: Appended content from ${pass2_ocrs.length} Pass 2 scans.`);
-      }
-
+      const combinedText = Array.from(uniqueLines).join('\n');
       ocrPages.push({
         page: page.page,
         fileName: page.fileName,
         fileId: page.fileId,
-        request_id: pass1_ocr.request_id || "",
-        confidence: typeof pass1_ocr.confidence === "number" ? pass1_ocr.confidence : null,
-        latex_styled: combinedLatex,
+        request_id: "tiling_strategy",
+        confidence: null,
+        latex_styled: combinedText,
         text: combinedText,
-        data: pass1_ocr.data || []
+        data: []
       });
     }
   } else {
     const directPages = msaExtractTextFromDocDirectly_(docId);
     directPages.forEach(p => ocrPages.push(p));
   }
-  // 🟢 DEBUG LOGGING START
-  if (ocrPages.length > 0) {
-    msaLog_(`_getOcrPages: Finished. Returning ${ocrPages.length} pages. First page text length: ${(ocrPages[0].text || "").length}, latex_styled length: ${(ocrPages[0].latex_styled || "").length}`);
-  } else {
-    msaLog_(`_getOcrPages: Finished. No pages found or processed.`);
-  }
-  // 🟢 DEBUG LOGGING END
   return { ocrPages: ocrPages, folder: folder };
 }
 
-/* =========================================================
- * Scoring / triggering / best-pick
- * ========================================================= */
+/* --- Scoring & Utilities --- */
 
 function msaShouldTriggerPass2_(pointsJson, score, validation, cfg) {
-  // Check if any points have compound marks (A1A1, M1A1, etc.) using the generic splitter function
   const hasCompoundMarks = (pointsJson.points || []).some(p => msaSplitCompoundMark_(p.mark));
-
-  const trigger = (
-    hasCompoundMarks || // 🟢 Force trigger if any compound mark is found
-    (score.coverage < cfg.MSA_PASS2_COVERAGE_TRIGGER) ||
-    (score.structure < cfg.MSA_PASS2_STRUCTURE_TRIGGER) ||
-    (score.duplicateReqRatio > cfg.MSA_PASS2_DUP_REQ_TRIGGER) ||
-    (score.noteOnlyRatio > cfg.MSA_PASS2_NOTE_ONLY_TRIGGER)
-  );
-
-  return {
-    trigger: trigger,
-    reason: hasCompoundMarks ? "compound_marks_detected" : (trigger ? "threshold" : "ok")
-  };
+  const trigger = (hasCompoundMarks || score.coverage < cfg.MSA_PASS2_COVERAGE_TRIGGER);
+  return { trigger: trigger, reason: hasCompoundMarks ? "compound_marks" : "threshold" };
 }
 
 function msaPickBestOutput_(pass1, pass2, pass3, validation, cfg) {
   const m1 = msaScorePointsOutput_(pass1.json, validation, cfg);
-  let m2 = null;
-  let m3 = null;
+  let best = pass1, bestPass = "pass1", bestScore = m1.score;
 
-  if (pass2) m2 = msaScorePointsOutput_(pass2.json, validation, cfg);
-  if (pass3) m3 = msaScorePointsOutput_(pass3.json, validation, cfg);
-
-  let bestPass = "pass1";
-  let best = pass1;
-  let bestScore = m1.score;
-
-  if (m2 && m2.score > bestScore) {
-    bestPass = "pass2";
-    best = pass2;
-    bestScore = m2.score;
+  if (pass2) {
+    const m2 = msaScorePointsOutput_(pass2.json, validation, cfg);
+    if (m2.score > bestScore) { best = pass2; bestPass = "pass2"; bestScore = m2.score; }
   }
-  if (m3 && m3.score > bestScore) {
-    bestPass = "pass3";
-    best = pass3;
-    bestScore = m3.score;
+  if (pass3) {
+    const m3 = msaScorePointsOutput_(pass3.json, validation, cfg);
+    if (m3.score > bestScore) { best = pass3; bestPass = "pass3"; }
   }
-
-  return {
-    bestPass: bestPass,
-    best: best,
-    metrics: { pass1: m1, pass2: m2, pass3: m3 }
-  };
+  return { bestPass: bestPass, best: best };
 }
 
-/**
- * Heuristic scoring for "how good" an extracted points JSON is.
- * (Used for pass triggering + choosing best.)
- */
 function msaScorePointsOutput_(pointsJson, validation, cfg) {
-  const pts = (pointsJson && pointsJson.points) ? pointsJson.points : [];
-  const warnings = (pointsJson && pointsJson.warnings) ? pointsJson.warnings : [];
-
-  // Coverage: extracted / marks found (loose)
-  const found = (validation && validation.looseMarksFoundTotal) ? validation.looseMarksFoundTotal : 0;
-  const extracted = pts.length;
-  const coverage = found > 0 ? (extracted / found) : 1.0;
-
-  // Duplicate requirements ratio (rough)
-  const reqs = pts.map(p => String(p.requirement || "").trim()).filter(Boolean);
-  const uniq = {};
-  reqs.forEach(r => { uniq[r] = (uniq[r] || 0) + 1; });
-  const dupCount = Object.keys(uniq).filter(k => uniq[k] > 1).length;
-  const duplicateReqRatio = reqs.length > 0 ? (dupCount / reqs.length) : 0;
-
-  // Note-only ratio (requirements that are basically Notes)
-  const noteOnlyCount = pts.filter(p => {
-    const r = String(p.requirement || "").trim().toLowerCase();
-    return r.startsWith("note:") || r.startsWith("award ") || r.startsWith("accept ");
-  }).length;
-  const noteOnlyRatio = pts.length > 0 ? (noteOnlyCount / pts.length) : 0;
-
-  // Structure score: basic sanity checks
-  let structure = 1.0;
-
-  // penalty for missing part labels
-  const unknownParts = pts.filter(p => String(p.part || "").trim() === "" || String(p.part || "").indexOf("unknown") >= 0).length;
-  if (pts.length > 0) structure -= 0.2 * (unknownParts / pts.length);
-
-  // penalty for very short requirements (often “a correct numerator” is OK, but empty-ish is not)
-  const tooShort = pts.filter(p => String(p.requirement || "").trim().length < 6).length;
-  if (pts.length > 0) structure -= 0.2 * (tooShort / pts.length);
-
-  // clamp
-  structure = Math.max(0, Math.min(1, structure));
-
-  // Score weighting (tweakable)
-  // Higher is better.
-  let score = 0;
-  score += 100 * coverage;
-  score += 20 * structure;
-  score -= 25 * duplicateReqRatio;
-  score -= 25 * noteOnlyRatio;
-  score -= 2 * warnings.length;
-
-  return {
-    extracted: extracted,
-    found: found,
-    coverage: coverage,
-    structure: structure,
-    duplicateReqRatio: duplicateReqRatio,
-    noteOnlyRatio: noteOnlyRatio,
-    warnings: warnings.length,
-    score: score
-  };
+  const pts = pointsJson.points || [];
+  const found = (validation && validation.looseMarksFoundTotal) || 0;
+  const coverage = found > 0 ? (pts.length / found) : 1.0;
+  return { coverage: coverage, score: (coverage * 100) - (pointsJson.warnings || []).length };
 }
-
-/* =========================================================
- * Validation report builder
- * ========================================================= */
 
 function msaBuildValidationReport_(cfg, docId, folder, ocrPages) {
-  const started = new Date();
   const meta = msaGetDocMeta_(cfg, docId);
-
-  const pageStats = ocrPages.map(p => ({
-    page: p.page,
-    confidence: p.confidence,
-    text_len: (p.text || "").length,
-    latex_styled_len: (p.latex_styled || "").length,
-    request_id: p.request_id
-  }));
-
   const allText = ocrPages.map(p => p.text || "").join("\n\n");
-  const strict = msaCountMarkTokensStrict_(allText);
-  const loose = msaCountMarkTokensLoose_(allText);
-
-  const report = {
-    process: "Markscheme Atomization (MSA)",
+  return {
     doc_title: meta.title,
     doc_id: docId,
-    run_started_iso: started.toISOString(),
-    run_ended_iso: null,
-    duration_seconds: null,
-
     pages_detected_after_dedupe: ocrPages.length,
-    saved_page_files: ocrPages.map(p => p.fileName),
-
-    ocr_page_stats: pageStats,
-
-    strictMarksFoundTotal: strict.total,
-    strictMarksFoundByType: strict.byType,
-
-    looseMarksFoundTotal: loose.total,
-    looseMarksFoundByType: loose.byType
+    looseMarksFoundTotal: msaCountMarkTokensLoose_(allText).total
   };
-
-  report.run_ended_iso = new Date().toISOString();
-  report.duration_seconds = Math.round((new Date(report.run_ended_iso) - new Date(report.run_started_iso)) / 1000);
-
-  return report;
-}
-
-function msaFormatValidationReport_(validation) {
-  const v = validation;
-
-  const lines = [];
-  lines.push("MARKSCHEME VALIDATION REPORT (Markscheme Atomization (MSA))");
-  lines.push("Doc title: " + (v.doc_title || ""));
-  lines.push("Doc ID: " + (v.doc_id || ""));
-  lines.push("Run started: " + (v.run_started_iso || ""));
-  lines.push("Run ended:   " + (v.run_ended_iso || ""));
-  if (v.duration_seconds != null) lines.push("Duration: " + v.duration_seconds + "s");
-  lines.push("");
-
-  lines.push("Pages detected (after image dedupe): " + v.pages_detected_after_dedupe);
-  lines.push("Saved page files: " + (v.saved_page_files || []).join(", "));
-  lines.push("");
-
-  lines.push("OCR PAGE STATS:");
-  (v.ocr_page_stats || []).forEach(s => {
-    lines.push(
-      "- Page " + s.page +
-      ": confidence=" + s.confidence +
-      ", text_len=" + s.text_len +
-      ", latex_styled_len=" + s.latex_styled_len +
-      ", request_id=" + s.request_id
-    );
-  });
-  lines.push("");
-
-  lines.push("MARKS FOUND IN OCR (STRICT mark-lines only):");
-  lines.push("Total strict marks found: " + v.strictMarksFoundTotal);
-  Object.keys(v.strictMarksFoundByType || {}).forEach(k => {
-    lines.push("  " + k + ": " + v.strictMarksFoundByType[k]);
-  });
-  lines.push("");
-
-  lines.push("MARKS FOUND IN OCR (LOOSE tokens, avoids Award/Note lines where possible):");
-  lines.push("Total loose marks found: " + v.looseMarksFoundTotal);
-  Object.keys(v.looseMarksFoundByType || {}).forEach(k => {
-    lines.push("  " + k + ": " + v.looseMarksFoundByType[k]);
-  });
-  lines.push("");
-
-  if (v.pass1) {
-    lines.push("PASS 1:");
-    lines.push("- Extracted points: " + v.pass1.extracted);
-    lines.push("- Coverage (extracted/looseFound): " + v.pass1.coverage.toFixed(2));
-    lines.push("- Structure score: " + v.pass1.structure.toFixed(2));
-    lines.push("- Duplicate req ratio: " + v.pass1.duplicateReqRatio.toFixed(2));
-    lines.push("- Note-only ratio: " + v.pass1.noteOnlyRatio.toFixed(2));
-    lines.push("- Score: " + v.pass1.score);
-    lines.push("");
-  }
-
-  if (v.pass2) {
-    lines.push("PASS 2:");
-    lines.push("- Extracted points: " + v.pass2.extracted);
-    lines.push("- Coverage (extracted/looseFound): " + v.pass2.coverage.toFixed(2));
-    lines.push("- Structure score: " + v.pass2.structure.toFixed(2));
-    lines.push("- Duplicate req ratio: " + v.pass2.duplicateReqRatio.toFixed(2));
-    lines.push("- Note-only ratio: " + v.pass2.noteOnlyRatio.toFixed(2));
-    lines.push("- Score: " + v.pass2.score);
-    lines.push("");
-  }
-
-  if (v.pass3) {
-    lines.push("PASS 3:");
-    lines.push("- Extracted points: " + v.pass3.extracted);
-    lines.push("- Coverage (extracted/looseFound): " + v.pass3.coverage.toFixed(2));
-    lines.push("- Structure score: " + v.pass3.structure.toFixed(2));
-    lines.push("- Duplicate req ratio: " + v.pass3.duplicateReqRatio.toFixed(2));
-    lines.push("- Note-only ratio: " + v.pass3.noteOnlyRatio.toFixed(2));
-    lines.push("- Score: " + v.pass3.score);
-    lines.push("");
-  }
-
-  if (v.best_pass) {
-    lines.push("BEST OUTPUT:");
-    lines.push("- best_pass: " + v.best_pass);
-    lines.push("- best_file: " + v.best_file);
-    lines.push("");
-    lines.push("Interpretation tips:");
-    lines.push("- If coverage is high but structure score is low, the parser is probably attaching Note/Award lines poorly or duplicating requirements.");
-    lines.push("- Pass2 triggers on structure problems, not just missing marks.");
-    lines.push("- Downstream grading should always use markscheme_points_best.json.");
-  }
-
-  if (v.officialTotalMarks !== null || v.extractedTotalScore !== null) {
-    lines.push("");
-    lines.push("TOTAL SCORE VALIDATION:");
-    lines.push("- Official Total (from '[X marks]' text): " + (v.officialTotalMarks !== null ? v.officialTotalMarks : "Not Found"));
-    lines.push("- Extracted Total (calculated from best pass): " + (v.extractedTotalScore !== null ? v.extractedTotalScore : "Not Calculated"));
-    if (v.officialTotalMarks !== null && v.extractedTotalScore !== null && v.officialTotalMarks === v.extractedTotalScore) {
-      lines.push("- ✅ Match: Yes");
-    }
-  }
-
-  return lines.join("\n");
-}
-
-/* =========================================================
- * Mark token counters
- * ========================================================= */
-
-function msaCountMarkTokensStrict_(text) {
-  // “Strict” = marks that appear as their own lines (e.g., "(M1)" or "A1")
-  const lines = String(text || "").split(/\r?\n/);
-  const byType = {};
-  let total = 0;
-
-  lines.forEach(line => {
-    const s = String(line || "").trim();
-    if (!s) return;
-
-    // common strict patterns
-    const m = s.match(/^\(?\s*([A-Z]{1,2}\d)\s*\)?$/);
-    if (m && m[1]) {
-      const tok = m[1];
-      byType[tok] = (byType[tok] || 0) + 1;
-      total++;
-    }
-  });
-
-  return { total: total, byType: byType };
 }
 
 function msaCountMarkTokensLoose_(text) {
-  // “Loose” = marks found anywhere, but avoid counting Award/Note explanation lines where possible
   const lines = String(text || "").split(/\r?\n/);
-  const byType = {};
   let total = 0;
-
   lines.forEach(line => {
-    const s = String(line || "").trim();
-    if (!s) return;
-
-    // Skip lines that are clearly just instructions / meta
-    const lower = s.toLowerCase();
-    if (lower.startsWith("note:") || lower.startsWith("award ") || lower.startsWith("accept ")) {
-      return;
-    }
-
-    // find tokens like A1, M1, R1, etc. Use a regex without word boundaries
-    // to correctly count joined marks like A1A1.
+    const s = line.trim();
+    if (!s || /note:|award |accept /i.test(s)) return;
     const matches = s.match(/[A-Z]{1,2}\d/g);
-    if (!matches) return;
-
-    matches.forEach(tok => {
-      byType[tok] = (byType[tok] || 0) + 1;
-      total++;
-    });
+    if (matches) total += matches.length;
   });
-
-  return { total: total, byType: byType };
-}
-
-/* =========================================================
- * Question meta (skip map) loader
- * ========================================================= */
-
-function msaLoadQuestionMetaSkipMap_(cfg) {
-  try {
-    const ss = SpreadsheetApp.openById(cfg.MSA_QUESTION_META_SHEET_ID);
-    const sh = ss.getSheetByName(cfg.MSA_QUESTION_META_SHEET_TAB) || ss.getSheets()[0];
-    const values = sh.getDataRange().getValues();
-
-    // Expect header row. We’ll try to find:
-    // - question_id / doc_id
-    // - command_term
-    // - skip_automated_grading (optional)
-    const header = values[0].map(v => String(v || "").trim().toLowerCase());
-    const idxDoc = header.indexOf("doc_id") >= 0 ? header.indexOf("doc_id") : header.indexOf("question_id");
-    const idxCmd = header.indexOf("command_term");
-    const idxSkip = header.indexOf("skip_automated_grading");
-
-    if (idxDoc < 0 || idxCmd < 0) return null;
-
-    const skipMap = {};
-    for (let r = 1; r < values.length; r++) {
-      const row = values[r];
-      const did = String(row[idxDoc] || "").trim();
-      const cmd = String(row[idxCmd] || "").trim().toLowerCase();
-      const skip = idxSkip >= 0 ? String(row[idxSkip] || "").trim().toLowerCase() : "";
-
-      if (!did) continue;
-
-      const shouldSkip = (skip === "true" || skip === "1" || skip === "yes");
-      skipMap[did] = { command_term: cmd, skip_auto: shouldSkip };
-    }
-
-    return Object.keys(skipMap).length ? skipMap : null;
-  } catch (e) {
-    msaWarn_("skipMap: could not load question meta sheet (non-fatal): " + e.message);
-    return null;
-  }
+  return { total: total };
 }
