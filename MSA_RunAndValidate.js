@@ -226,15 +226,21 @@ function _getOcrPages(docId) {
         lineData = lineData.filter(line => line && line.p1 && line.p2 && line.p3 && line.p4);
       }
 
+      // Sort lineData by y-coordinate for consistent processing
+      lineData.sort((a, b) => a.p1.y - b.p1.y);
+
+      // Calculate average line height for dynamic thresholds
+      // Default to 20px if no lines are found to prevent division by zero.
+      const avgLineHeight = lineData.length > 0 ?
+        lineData.reduce((sum, line) => sum + Math.abs(line.p4.y - line.p1.y), 0) / lineData.length :
+        20;
+
       // Scan for large vertical gaps between lines
       if (lineData.length > 1 && page.width && page.height) {
-        lineData.sort((a, b) => a.p1.y - b.p1.y);
         for (let i = 0; i < lineData.length - 1; i++) {
           const line1_y_max = Math.max(lineData[i].p3.y, lineData[i].p4.y);
           const line2_y_min = Math.min(lineData[i + 1].p1.y, lineData[i + 1].p2.y);
           const verticalGap = line2_y_min - line1_y_max;
-
-          const avgLineHeight = Math.abs(lineData[0].p4.y - lineData[0].p1.y);
           const GAP_THRESHOLD_MULTIPLIER = 1.5; // Re-tuned threshold
 
           if (verticalGap > (avgLineHeight * GAP_THRESHOLD_MULTIPLIER)) {
@@ -243,31 +249,31 @@ function _getOcrPages(docId) {
               top_left_y: line1_y_max / page.height,
               width: 1,
               height: verticalGap / page.height,
-              _reason: `vertical_gap (${verticalGap.toFixed(0)}px)`
+              _reason: `vertical_gap (${verticalGap.toFixed(0)}px between line ${i} and ${i + 1})`
             });
           }
         }
       }
 
       // Heuristic Scan: Look for inequalities that might be missing a final integer answer.
-      if (lineData.length > 0 && page.width && page.height) {
+      if (lineData.length > 0 && page.width && page.height && avgLineHeight > 0) {
         for (let i = 0; i < lineData.length; i++) {
           const line = lineData[i];
           if (line.text && (line.text.includes('>') || line.text.includes('<'))) {
             // Found an inequality. Check if the next line is missing or not an integer assignment.
             const nextLine = lineData[i + 1];
-            const hasIntegerAnswerFollowing = nextLine && nextLine.text && /n\s*[=≥]\s*\d+/.test(nextLine.text);
+            const hasIntegerAnswerFollowing = nextLine && nextLine.text && /n\s*[=≥]\s*\d+(\.\d+)?/.test(nextLine.text);
 
             if (!hasIntegerAnswerFollowing) {
               msaLog_(`Page ${page.page} - Heuristic: Inequality found without clear integer answer. Scanning below.`);
               const y_start = Math.max(line.p3.y, line.p4.y);
-              const scan_height = (Math.abs(line.p4.y - line.p1.y) || 20) * 3; // Scan 3 line heights below
+              const scan_height = avgLineHeight * 3; // Scan 3 line heights below
               pass2_regions_to_scan.push({
                 top_left_x: 0,
                 top_left_y: y_start / page.height,
                 width: 1,
                 height: scan_height / page.height,
-                _reason: `heuristic_inequality_check`
+                _reason: `heuristic_inequality_check (below line ${i})`
               });
             }
           }
@@ -275,7 +281,7 @@ function _getOcrPages(docId) {
       }
 
       // Scan margins and footer for missed content like (M1) or n=335
-      if (lineData.length > 0 && page.width && page.height) {
+      if (lineData.length > 0 && page.width && page.height && avgLineHeight > 0) {
         let max_y = 0;
         const all_x_ends = [];
         lineData.forEach(line => {
@@ -283,22 +289,33 @@ function _getOcrPages(docId) {
           all_x_ends.push(line.p2.x, line.p3.x);
         });
 
-        // Use 95th percentile for main content width to be robust against outliers.
-        all_x_ends.sort((a, b) => a - b);
-        const max_x = all_x_ends[Math.floor(all_x_ends.length * 0.95)] || (page.width * 0.8);
+        // Use 90th percentile for main content width to be robust against outliers and allow wider margin scan.
+        all_x_ends.sort((a, b) => a - b); // Sort to find percentile
+        const main_content_max_x = all_x_ends.length > 0 ? all_x_ends[Math.floor(all_x_ends.length * 0.90)] : (page.width * 0.8);
 
-        const avgLineHeight = Math.abs(lineData[0].p4.y - lineData[0].p1.y);
-        const MARGIN_WIDTH_THRESHOLD = 50; // pixels
+        const MARGIN_WIDTH_THRESHOLD = 70; // pixels - increased to capture more of the margin
         const FOOTER_HEIGHT_THRESHOLD = avgLineHeight * 1.5;
 
         // Right Margin (most common for marks)
-        if ((page.width - max_x) > MARGIN_WIDTH_THRESHOLD) {
+        if ((page.width - main_content_max_x) > MARGIN_WIDTH_THRESHOLD) {
           pass2_regions_to_scan.push({
-            top_left_x: max_x / page.width,
+            top_left_x: main_content_max_x / page.width,
             top_left_y: 0,
-            width: (page.width - max_x) / page.width,
+            width: (page.width - main_content_max_x) / page.width,
             height: 1,
             _reason: "right_margin"
+          });
+        }
+
+        // New: Left Margin (for very early marks or part labels)
+        const min_x = all_x_ends.length > 0 ? all_x_ends[Math.floor(all_x_ends.length * 0.10)] : (page.width * 0.2);
+        if (min_x > MARGIN_WIDTH_THRESHOLD) { // If there's a significant left margin
+          pass2_regions_to_scan.push({
+            top_left_x: 0,
+            top_left_y: 0,
+            width: min_x / page.width,
+            height: 1,
+            _reason: "left_margin"
           });
         }
 
@@ -312,6 +329,74 @@ function _getOcrPages(docId) {
             _reason: "footer"
           });
         }
+      }
+
+      // 4. New Heuristic: Isolated Small Elements Scan
+      // This aims to find small, isolated text/math elements that Mathpix detected
+      // but didn't group into a full 'line_data' entry.
+      const allElements = pass1_ocr.data || [];
+      if (allElements.length > 0 && page.width && page.height && avgLineHeight > 0) {
+        const MIN_ELEMENT_HEIGHT = avgLineHeight * 0.3; // e.g., 30% of avg line height
+        const MAX_ELEMENT_HEIGHT = avgLineHeight * 0.8; // e.g., 80% of avg line height
+        const MIN_ELEMENT_WIDTH = 10; // pixels
+        const OVERLAP_THRESHOLD = 0.5; // If >50% of element overlaps a line, it's not isolated.
+
+        allElements.forEach(element => {
+          // Ensure element has valid bounding box
+          if (!element.bbox || element.bbox.length !== 4) return;
+
+          const [x1, y1, x2, y2] = element.bbox;
+          const elementHeight = y2 - y1;
+          const elementWidth = x2 - x1;
+
+          // Filter for small, potentially isolated elements
+          if (elementHeight < MIN_ELEMENT_HEIGHT || elementHeight > MAX_ELEMENT_HEIGHT || elementWidth < MIN_ELEMENT_WIDTH) {
+            return;
+          }
+
+          // Check if this element significantly overlaps with any existing line_data
+          let isOverlappingWithLine = false;
+          for (const line of lineData) {
+            const line_x1 = Math.min(line.p1.x, line.p4.x);
+            const line_y1 = Math.min(line.p1.y, line.p2.y);
+            const line_x2 = Math.max(line.p2.x, line.p3.x);
+            const line_y2 = Math.max(line.p3.y, line.p4.y);
+
+            // Simple AABB overlap check
+            if (x1 < line_x2 && x2 > line_x1 && y1 < line_y2 && y2 > line_y1) {
+              // Calculate overlap area
+              const overlapX = Math.max(0, Math.min(x2, line_x2) - Math.max(x1, line_x1));
+              const overlapY = Math.max(0, Math.min(y2, line_y2) - Math.max(y1, line_y1));
+              const overlapArea = overlapX * overlapY;
+              const elementArea = elementWidth * elementHeight;
+
+              // If more than OVERLAP_THRESHOLD of the element overlaps with a line, consider it part of that line.
+              if (elementArea > 0 && overlapArea / elementArea > OVERLAP_THRESHOLD) {
+                isOverlappingWithLine = true;
+                break;
+              }
+            }
+          }
+
+          if (!isOverlappingWithLine) {
+            // This element is small and isolated. Define a region around it.
+            const padding_x = avgLineHeight * 0.5; // Add some padding around the element
+            const padding_y = avgLineHeight * 0.5;
+
+            const region_x1 = Math.max(0, x1 - padding_x);
+            const region_y1 = Math.max(0, y1 - padding_y);
+            const region_x2 = Math.min(page.width, x2 + padding_x);
+            const region_y2 = Math.min(page.height, y2 + padding_y);
+
+            pass2_regions_to_scan.push({
+              top_left_x: region_x1 / page.width,
+              top_left_y: region_y1 / page.height,
+              width: (region_x2 - region_x1) / page.width,
+              height: (region_y2 - region_y1) / page.height,
+              _reason: `isolated_element (${element.text || element.latex_styled || 'math'})`
+            });
+          }
+        });
       }
 
       // --- Log Regions and Execute Scans ---
