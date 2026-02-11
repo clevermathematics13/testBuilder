@@ -292,6 +292,9 @@ function msaMathpixOcrFromDriveImage_(fileId, cfg, options) {
 
 function msaBuildCombinedOcr_(cfg, docId, folder, ocrPages) {
   var fullText = ocrPages.map(function(p) { return p.text; }).join("\n\n");
+  // 🟢 DEBUG LOGGING START
+  msaLog_(`msaBuildCombinedOcr_: Combined text length is ${fullText.length}.`);
+  // 🟢 DEBUG LOGGING END
   return {
     readable: fullText,
     json: ocrPages

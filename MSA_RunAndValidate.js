@@ -50,6 +50,12 @@ function runMSA_VR_One_ForWebApp(docId) {
  * Returns a status object for the UI.
  */
 function _runMsaPipeline(docId, ocrPages) {
+  // 🟢 DEBUG LOGGING START
+  msaLog_(`_runMsaPipeline: Started for docId=${docId}. Received ${ocrPages.length} OCR pages.`);
+  if (ocrPages.length > 0) {
+    msaLog_(`_runMsaPipeline: First page text length: ${(ocrPages[0].text || "").length}`);
+  }
+  // 🟢 DEBUG LOGGING END
   const cfg = msaGetConfig_();
   const rules = msaLoadGradingRules_(cfg);
   const folder = msaGetOrCreateQuestionFolder_(cfg, docId);
@@ -206,6 +212,9 @@ function _getOcrPages(docId) {
       msaLog_(`Page ${page.page} - Pass 1: Full page OCR`);
       const pass1_options = { "data_options": { "include_line_data": true } };
       const pass1_ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, pass1_options);
+      // 🟢 DEBUG LOGGING START
+      msaLog_(`Page ${page.page} Pass 1 OCR Response (raw): ${JSON.stringify(pass1_ocr).substring(0, 500)}`);
+      // 🟢 DEBUG LOGGING END
       msaLog_(`Page ${page.page} Mathpix: latex_styled length=${(pass1_ocr.latex_styled || "").length}, text length=${(pass1_ocr.text || "").length}`);
 
       // --- PASS 2: Suspicious Gap Detection & Re-OCR ---
@@ -237,6 +246,9 @@ function _getOcrPages(docId) {
 
             const pass2_options = { region: region };
             const pass2_ocr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, pass2_options);
+            // 🟢 DEBUG LOGGING START
+            msaLog_(`Page ${page.page} Pass 2 OCR Response (raw): ${JSON.stringify(pass2_ocr).substring(0, 500)}`);
+            // 🟢 DEBUG LOGGING END
 
             if (pass2_ocr && pass2_ocr.text && pass2_ocr.text.trim() !== '') {
               msaLog_(`Page ${page.page} - Pass 2: Found additional text: "${pass2_ocr.text.trim().substring(0, 50)}..."`);
@@ -271,6 +283,13 @@ function _getOcrPages(docId) {
     const directPages = msaExtractTextFromDocDirectly_(docId);
     directPages.forEach(p => ocrPages.push(p));
   }
+  // 🟢 DEBUG LOGGING START
+  if (ocrPages.length > 0) {
+    msaLog_(`_getOcrPages: Finished. Returning ${ocrPages.length} pages. First page text length: ${(ocrPages[0].text || "").length}, latex_styled length: ${(ocrPages[0].latex_styled || "").length}`);
+  } else {
+    msaLog_(`_getOcrPages: Finished. No pages found or processed.`);
+  }
+  // 🟢 DEBUG LOGGING END
   return { ocrPages: ocrPages, folder: folder };
 }
 
