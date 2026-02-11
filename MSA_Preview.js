@@ -70,21 +70,20 @@ function msaBuildPreviewHtml_(title, docId, ocrPages) {
     hr { margin: 2em 0; }
     .row {
       display: grid;
-      grid-template-columns: 110px 1fr 90px; /* method | main | marks */
+      grid-template-columns: 1fr 90px; /* main | marks */
       column-gap: 18px;
       align-items: start;
       margin: 8px 0;
     }
     .row--new-part { margin-top: 1.8em; }
-    .method-label { font-weight: 700; text-align: left; padding-top: 1px; }
     .main { font-size: 15px; }
     .main .part { margin-right: 25px; }
     .main .subpart { margin-right: 20px; }
     .mark { text-align: right; white-space: nowrap; color: #333; }
     .mark .paren { font-style: italic; }
     .mark .plain { font-style: normal; }
+    .row--heading .main { font-weight: 700; margin-top: 1em; }
     .row--displaymath .mark { align-self: center; }
-    .row--displaymath .method-label { align-self: center; }
     .row--equalsline .main { padding-left: 2.2em; }
     .note-box { border: 1px solid #333; padding: 10px 12px; margin: 10px 0 12px 0; font-size: 0.95em; }
     mjx-container[display="true"] { margin: 0.3em 0 !important; }
@@ -154,15 +153,19 @@ function _buildStructuredHtmlFromText_(text) {
     return stripped === '';
   };
 
-  let pendingMethod = null;
-
   for (let i = 0; i < allTokens.length; i++) {
     const line = allTokens[i];
 
-    // A) Handle METHOD headings by setting a pending label.
+    // A) Handle METHOD headings by creating a dedicated row.
     const methodMatch = line.match(/^METHOD\s+(\d+)$/i);
     if (methodMatch) {
-      pendingMethod = `METHOD ${methodMatch[1]}`;
+      rows.push({
+        main: `METHOD ${methodMatch[1]}`,
+        marks: [],
+        partLabels: [],
+        type: 'heading',
+        isMarkable: false
+      });
       continue;
     }
 
@@ -190,11 +193,9 @@ function _buildStructuredHtmlFromText_(text) {
         main: `<div class="note-box">${noteContent.join('<br>')}</div>`,
         marks: [],
         partLabels: [],
-        methodLabel: pendingMethod,
         type: 'note',
         isMarkable: true
       });
-      pendingMethod = null;
       continue;
     }
 
@@ -225,12 +226,10 @@ function _buildStructuredHtmlFromText_(text) {
       main: main,
       marks: currentMarks,
       partLabels: partLabels,
-      methodLabel: pendingMethod,
       type: 'text',
       isMarkable: true,
       isNewMainPart: isNewMainPart
     };
-    pendingMethod = null;
 
     // Re-substitute display math placeholders.
     if (/^@@MJX_BLOCK_\d+@@$/.test(main)) {
@@ -239,20 +238,18 @@ function _buildStructuredHtmlFromText_(text) {
       newRow.type = 'display-math';
       if (newRow.main.trim().startsWith('\\[=')) newRow.type = 'equals-line';
     }
-    
+
     rows.push(newRow);
   }
 
   // Phase 3: Render the final HTML from the structured row model.
   return rows.map(row => {
     let rowClasses = ['row'];
-    if (row.methodLabel) { rowClasses.push('row--with-method'); }
     if (row.isNewMainPart) { rowClasses.push('row--new-part'); }
+    if (row.type === 'heading') { rowClasses.push('row--heading'); }
     if (row.type === 'display-math' || row.type === 'equals-line') { rowClasses.push('row--displaymath'); }
     if (row.type === 'equals-line') { rowClasses.push('row--equalsline'); }
     if (row.type === 'note') { rowClasses.push('row--note'); }
-
-    const methodLabelHtml = `<div class="method-label">${row.methodLabel || ''}</div>`;
 
     const partLabelsHtml = (row.partLabels || []).map((label, index) => {
       const className = index === 0 ? 'part' : 'subpart';
@@ -266,6 +263,6 @@ function _buildStructuredHtmlFromText_(text) {
 
     const mainContentHtml = `<div class="main">${partLabelsHtml}${row.main}</div>`;
 
-    return `<div class="${rowClasses.join(' ')}">${methodLabelHtml}${mainContentHtml}<div class="mark">${marksHtml}</div></div>`;
+    return `<div class="${rowClasses.join(' ')}">${mainContentHtml}<div class="mark">${marksHtml}</div></div>`;
   }).join('');
 }
