@@ -219,7 +219,13 @@ function _getOcrPages(docId) {
 
       // --- PASS 2: Suspicious Gap Detection & Re-OCR ---
       const pass2_texts = [];
-      const lineData = pass1_ocr.line_data || [];
+      let lineData = pass1_ocr.line_data || [];
+
+      // Defensively filter lineData to ensure all elements have the required point structure.
+      if (lineData.length > 0) {
+        lineData = lineData.filter(line => line && line.p1 && line.p2 && line.p3 && line.p4);
+      }
+
       if (lineData.length > 1 && page.width && page.height) {
         lineData.sort((a, b) => a.p1.y - b.p1.y);
 
