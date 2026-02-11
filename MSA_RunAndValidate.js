@@ -187,26 +187,24 @@ function _getOcrPages(docId) {
         }
       }
 
-      let hasLoggedLineDataObject = false; // Add a flag to prevent log spam
       const allLines = [];
       regions.forEach((region, index) => {
         msaLog_(`Page ${page.page} - Scanning tile ${index + 1}/${regions.length}: x:${region.top_left_x}, y:${region.top_left_y}, w:${region.width}, h:${region.height}`);
         const tileOcr = msaMathpixOcrFromDriveImage_(page.fileId, cfg, { region: region, include_line_data: true });
         
         if (tileOcr && tileOcr.line_data && tileOcr.line_data.length > 0) {
-          if (!hasLoggedLineDataObject) {
-            msaLog_(`   > DIAGNOSTIC: First line object found: ${JSON.stringify(tileOcr.line_data[0])}`);
-            hasLoggedLineDataObject = true;
-          }
-
           msaLog_(`   > Tile ${index + 1} found ${tileOcr.line_data.length} lines.`);
           tileOcr.line_data.forEach(line => {
-            if (!line.p1 || !line.p3) return; // Skip lines without coordinate data
-            const y_center = (line.p1.y + line.p3.y) / 2;
-            allLines.push({
-              text: line.text,
-              abs_y: y_center + region.top_left_y
-            });
+            // The regional OCR returns coordinates in a 'cnt' array: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+            if (line.cnt && line.cnt.length >= 3 && line.cnt[0].length === 2 && line.cnt[2].length === 2) {
+              const y1 = line.cnt[0][1]; // y-coordinate of the first point
+              const y3 = line.cnt[2][1]; // y-coordinate of the third point
+              const y_center = (y1 + y3) / 2;
+              allLines.push({
+                text: line.text,
+                abs_y: y_center + region.top_left_y // Add the tile's y-offset to get absolute y
+              });
+            }
           });
         } else {
           msaLog_(`   > Tile ${index + 1} found no text lines.`);
