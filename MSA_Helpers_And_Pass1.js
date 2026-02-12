@@ -172,9 +172,10 @@ function msaWritePreviewArtifacts_(cfg, docId, folder, pages) {
 function msaCalculateTotalPossibleScore_(points) {
   const byPart = {};
   (points || []).forEach(p => {
-    // 🟢 NEW: Group by the primary part letter (e.g., 'ai' becomes 'a')
-    const primaryPart = (p.part || 'unknown').match(/^[a-z]/);
-    const partKey = primaryPart ? primaryPart[0] : 'unknown';
+    // Group by the parent part. e.g., 'ai' and 'aii' both group under 'a'.
+    const partStr = p.part || 'unknown';
+    const romanNumeralMatch = partStr.match(/[ivx]/);
+    const partKey = romanNumeralMatch ? partStr.substring(0, romanNumeralMatch.index) : partStr;
     if (!byPart[partKey]) byPart[partKey] = [];
     byPart[partKey].push(p);
   });
@@ -218,8 +219,10 @@ function msaCalculateTotalPossibleScore_(points) {
 
     // Add the non-branch score for the part
     let partScore = nonBranchScore;
-    // For each group of alternative branches, find the max and add it
+    // For each group of alternative branches (like METHOD or EITHER_OR),
+    // find the score of the highest-scoring branch and add it to the part's score.
     for (const group in branchGroups) {
+      // e.g., for METHOD, groupScores might be [2, 2, 2] for METHOD1, METHOD2, METHOD3
       const groupScores = Object.values(branchGroups[group]);
       partScore += groupScores.length > 0 ? Math.max(...groupScores) : 0;
     }
@@ -244,7 +247,7 @@ function msaGetMarkValue_(marks) {
   if (markArray.length === 0) return 0;
 
   return markArray.reduce((sum, token) => {
-    if (token === 'AG' || token === '(AG)') return sum + 1; // AG is often worth 1 mark.
+    if (token === 'AG' || token === '(AG)') return sum; // AG (Answer Given) is a checkpoint, not a score. It's worth 0 marks.
     const m = token.match(/\d+/); // Find any sequence of digits in the token.
     return sum + (m ? parseInt(m[0], 10) : 0);
   }, 0);

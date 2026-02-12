@@ -143,9 +143,10 @@ function srgCalculateAwardedScore_(results) {
   const byPart = {};
   results.forEach(res => {
     if (!res.awarded) return; // Only consider awarded points
-    // 🟢 NEW: Group by the primary part letter
-    const primaryPart = (res.part || 'unknown').match(/^[a-z]/);
-    const partKey = primaryPart ? primaryPart[0] : 'unknown';
+    // Group by the parent part. e.g., 'ai' and 'aii' both group under 'a'.
+    const partStr = res.part || 'unknown';
+    const romanNumeralMatch = partStr.match(/[ivx]/);
+    const partKey = romanNumeralMatch ? partStr.substring(0, romanNumeralMatch.index) : partStr;
     if (!byPart[partKey]) byPart[partKey] = [];
     byPart[partKey].push(res);
   });
@@ -188,8 +189,10 @@ function srgCalculateAwardedScore_(results) {
     });
  
     let partScore = nonBranchScore;
+    // For each group of alternative branches (like METHOD or EITHER_OR),
+    // find the score of the highest-scoring branch and add it to the part's score.
     for (const group in branchGroups) {
-      const groupScores = Object.values(branchGroups[group]);
+      const groupScores = Object.values(branchGroups[group]); // e.g., [2, 2, 2] for METHODs
       partScore += groupScores.length > 0 ? Math.max(...groupScores) : 0;
     }
     totalAwarded += partScore;
