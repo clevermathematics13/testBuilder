@@ -133,9 +133,28 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
         }
 
         const markInfo = msaDetectMarkTag_(line);
+        // MARK-ONLY line (no requirementPart)
         if (markInfo && !markInfo.requirementPart) {
-            pendingMarks.push(...markInfo.marks);
-            msaLog_(`Pass1: Found pending mark(s) [${markInfo.marks.join(',')}] on line ${i}.`);
+
+          // If we already have requirement text in the buffer, this mark-only line
+          // should close that point immediately (prevents clumping).
+          if (buffer.length > 0) {
+            msaLog_(`Pass1: Mark-only line [${markInfo.marks.join(',')}] is flushing buffer.`);
+            flushBuffer(markInfo.marks, i);
+            continue;
+          }
+
+          // If no buffer, but we already emitted a point, attach to it.
+          // This handles cases like: "= 2835" then "A1" on the next OCR line.
+          if (lastPoint) {
+            msaLog_(`Pass1: Attaching orphan mark(s) [${markInfo.marks.join(',')}] to previous point.`);
+            lastPoint.marks.push(...markInfo.marks);
+            continue;
+          }
+
+          // Otherwise hold for the next requirement we find.
+          msaLog_(`Pass1: Found pending mark(s) [${markInfo.marks.join(',')}] on line ${i} (no current buffer or last point).`);
+          pendingMarks.push(...markInfo.marks);
             continue;
         }
 
