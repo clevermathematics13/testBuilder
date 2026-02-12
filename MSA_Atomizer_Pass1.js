@@ -58,6 +58,8 @@ function msaPreprocessLines_(text, rules) {
 }
 
 function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
+    const DEBUG_PASS1 = true; // Set to true for verbose parsing logs.
+
     msaLog_("PASS1 PARSER VERSION: 2026-02-12 lookahead-v1");
     let part = "unknown";
     let lastLetterPart = "unknown";
@@ -79,6 +81,9 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
 
         let allMarks = [...pendingMarks, ...terminatingMarks];
         if (allMarks.length === 0) {
+            if (DEBUG_PASS1 && buffer.length > 0) {
+                msaLog_(`Pass1: Discarding dangling buffer with no mark. Content: "${buffer.slice(0, 2).join(' ')}..."`);
+            }
             warnings.push(`Pass1: Dangling buffer with no mark: "${buffer.join(' ')}"`);
             buffer = [];
             return;
@@ -159,16 +164,24 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
              // If it follows a point, it's likely the answer mark for that point's work.
              // Create a NEW point for it.
              if (lastPoint && lastPoint.requirement) {
-                 msaLog_(`Pass1: Creating new answer point for mark(s) [${markInfo.marks.join(',')}] from previous requirement.`);
-                 
-                 const answerReq = msaExtractAnswerTail_(lastPoint.requirement);
+                 const originalReq = lastPoint.requirement;
+                 const answerReq = msaFindAnswerTail_(originalReq);
+
+                 // Problem A Fix: Remove the answer from the previous point's requirement.
+                 if (answerReq) {
+                    lastPoint.requirement = originalReq.replace(new RegExp(_escapeRegExp(answerReq) + "\\s*$"), "").trim();
+                    lastPoint.requirement = lastPoint.requirement.replace(/\\\\\s*$/, "").trim(); // Clean up trailing LaTeX newline
+                    if (DEBUG_PASS1) {
+                        msaLog_(`Pass1: Split point. New work length: ${lastPoint.requirement.length}. Extracted answer: "${answerReq}"`);
+                    }
+                 }
  
                  const newPt = {
                      page: pageNum,
                      part: lastPoint.part,
                      branch: lastPoint.branch,
                      marks: markInfo.marks,
-                     requirement: answerReq || "Answer from previous step", // Fallback requirement
+                     requirement: answerReq || "Final answer", // Fallback requirement
                      notes: [],
                      source_line_index: i
                  };
@@ -190,12 +203,21 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
         }
 
         if (line.trim()) {
+            const trimmedLine = line.trim();
+            // Problem B Fix: Normalize line by removing LaTeX wrappers before checking.
+            const normalizedLine = trimmedLine.replace(/^\\\(\s*|\s*\\\)$/g, '').trim();
+            const isUnmarkedAnswer = lastPoint && lastPoint.marks.some(m => m.startsWith('A')) && /^\s*n\s*=\s*\d+\s*$/.test(normalizedLine);
+
+            if (DEBUG_PASS1) {
+                msaLog_(`Pass1: Checking unmarked line. Raw: "${trimmedLine}", Norm: "${normalizedLine}", Match: ${isUnmarkedAnswer}`);
+            }
+
             // Unmarked final answer rule
-            if (lastPoint && lastPoint.marks.some(m => m.startsWith('A')) && /^\s*n\s*=\s*\d+\s*$/.test(line.trim())) {
-                msaLog_(`Pass1: Appending unmarked answer "${line.trim()}" to previous A-point's requirement.`);
-                lastPoint.requirement = line.trim(); // Replace requirement with the more specific answer
+            if (isUnmarkedAnswer) {
+                msaLog_(`Pass1: Assigning unmarked answer "${trimmedLine}" to previous A-point.`);
+                lastPoint.requirement = trimmedLine; // Replace requirement with the more specific answer
                 // Don't add to buffer, we've consumed it.
-                continue; 
+                continue;
             }
             buffer.push(line);
         }
@@ -211,7 +233,7 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
  * @param {string} requirement The full requirement text block.
  * @returns {string} The extracted answer line, or a fallback.
  */
-function msaExtractAnswerTail_(requirement) {
+function msaFindAnswerTail_(requirement) {
     if (!requirement) return "";
     // Split by actual newlines and also by LaTeX newlines
     const lines = requirement.split(/\\\\\r?\n|\r?\n|\\\\/);
@@ -229,6 +251,10 @@ function msaExtractAnswerTail_(requirement) {
         if (line) return line;
     }
     return ""; // Should not be reached if requirement is not empty.
+}
+
+function _escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
 }
 
 function msaDetectMarkTag_(line) {
