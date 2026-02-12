@@ -19,12 +19,9 @@ function msaAtomizerPass3_(passIn, ocrByPage) {
   for (var i = 0; i < (out.points || []).length; i++) {
     var p = out.points[i];
 
-    // Normalize mark token (helps with A1,A1 etc)
-    p.mark = msaNormalizeMarkToken_P3_(p.mark);
-
     // Enrich THEN A-points with final value
     var isThen = (p.branch || "").toString().toUpperCase() === "THEN";
-    var isA = /^A\d+$/i.test(String(p.mark || ""));
+    var isA = (p.marks || []).some(m => /^A\d+$/i.test(m));
 
     if (isThen && isA) {
       var pageNum = (p.page == null) ? null : String(p.page);
@@ -41,23 +38,12 @@ function msaAtomizerPass3_(passIn, ocrByPage) {
       if (finalVal) {
         p.notes.push("Pass3: captured final value after THEN: " + finalVal);
       } else {
-        out.warnings.push("Pass3: THEN " + p.mark + " had no detected final value on page " + pageNum + " (id=" + (p.id || "(no id)") + ").");
+        out.warnings.push("Pass3: THEN " + (p.marks || []).join('') + " had no detected final value on page " + pageNum + " (id=" + (p.id || "(no id)") + ").");
       }
     }
   }
 
   return out;
-}
-
-function msaNormalizeMarkToken_P3_(mark) {
-  var s = (mark == null) ? "" : String(mark).trim();
-  if (s.charAt(0) === "(" && s.charAt(s.length - 1) === ")") {
-    s = s.substring(1, s.length - 1).trim();
-  }
-  s = s.replace(/\s+/g, "");
-  s = s.replace(/,/g, "");
-  s = s.replace(/;/g, "");
-  return s;
 }
 
 function msaSafeLineIndex_P3_(point, lines) {

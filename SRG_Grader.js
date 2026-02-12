@@ -65,7 +65,7 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
     const matchResult = srgMatchRequirement_(studentText, point.requirement);
     results.push({
       point_id: point.id,
-      mark: point.mark,
+      marks: point.marks,
       awarded: matchResult.awarded,
       match_score: matchResult.score,
       requirement: point.requirement,
@@ -83,7 +83,7 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
   msaLog_("Total Points Awarded: " + awardedScoreInfo.total + " / " + possibleScoreInfo.total);
   results.forEach(res => {
     const status = res.awarded ? "✅ AWARDED" : "❌ NOT AWARDED";
-    msaLog_(status + " (" + res.mark + ") - Match Score: " + res.match_score.toFixed(2) + " - ID: " + res.point_id);
+    msaLog_(status + " (" + (res.marks || []).join('') + ") - Match Score: " + res.match_score.toFixed(2) + " - ID: " + res.point_id);
   });
 
   const dt = Math.round((Date.now() - t0) / 1000);
@@ -143,12 +143,12 @@ function srgCalculateAwardedScore_(results) {
     const partResults = byPart[part];
 
     // 🟢 NEW: Heuristic for N marks.
-    const hasAwardedN = partResults.some(res => (res.mark || "").startsWith("N"));
+    const hasAwardedN = partResults.some(res => (res.marks || []).some(m => m.startsWith("N")));
     if (hasAwardedN) {
       // If any N mark is awarded, the score for this part is ONLY the sum of awarded N marks.
       const nScore = partResults
-        .filter(res => (res.mark || "").startsWith("N"))
-        .reduce((sum, res) => sum + msaGetMarkValue_(res.mark || ""), 0);
+        .filter(res => (res.marks || []).some(m => m.startsWith("N")))
+        .reduce((sum, res) => sum + msaGetMarkValue_(res.marks || []), 0);
       totalAwarded += nScore;
       breakdown.push(`Part '${part}': ${nScore} marks (N-marks rule)`);
       continue; // Move to next part
@@ -158,7 +158,7 @@ function srgCalculateAwardedScore_(results) {
     let nonBranchScore = 0;
  
     partResults.forEach(res => {
-      const value = msaGetMarkValue_(res.mark || "");
+      const value = msaGetMarkValue_(res.marks || []);
       const branch = res.branch || "";
 
       if (branch.startsWith("METHOD")) {

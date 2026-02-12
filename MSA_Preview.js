@@ -157,7 +157,7 @@ function _buildStructuredHtmlFromPoints_(points) {
     html += `<div>${point.branch ? `<div class="branch-label">${point.branch}</div>` : ''}</div>`;
     const sanitizedRequirement = _sanitizeForMathJax_(point.requirement);
     html += `<div class="requirement">${sanitizedRequirement.replace(/\n/g, '<br>')}</div>`;
-    html += `<div class="mark">${point.mark}</div>`;
+    html += `<div class="mark">${(point.marks || []).join(' ')}</div>`;
     html += '</div>';
     if (point.notes && point.notes.length > 0) {
       const sanitizedNotes = _sanitizeForMathJax_(point.notes.join('\n'));

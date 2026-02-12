@@ -184,10 +184,10 @@ function msaCalculateTotalPossibleScore_(points) {
   for (const part in byPart) {
     const partPoints = byPart[part];
 
-    // 🟢 NEW: Heuristic for N marks. If N marks exist, they are the only score for this part.
-    const nPoints = partPoints.filter(p => (p.mark || "").startsWith("N"));
+    // Heuristic for N marks. If N marks exist, they are the only score for this part.
+    const nPoints = partPoints.filter(p => (p.marks || []).some(m => m.startsWith("N")));
     if (nPoints.length > 0) {
-      const partScore = nPoints.reduce((sum, p) => sum + msaGetMarkValue_(p.mark || ""), 0);
+      const partScore = nPoints.reduce((sum, p) => sum + msaGetMarkValue_(p.marks || []), 0);
       totalScore += partScore;
       breakdown.push(`Part '${part}': ${partScore} marks (N-marks rule)`);
       continue; // Move to the next part
@@ -197,7 +197,7 @@ function msaCalculateTotalPossibleScore_(points) {
     let nonBranchScore = 0;
 
     partPoints.forEach(p => {
-      const value = msaGetMarkValue_(p.mark || "");
+      const value = msaGetMarkValue_(p.marks || []);
       const branch = p.branch || "";
 
       if (branch.startsWith("METHOD")) {
@@ -239,11 +239,12 @@ function msaCalculateTotalPossibleScore_(points) {
  * @param {string} mark The mark token.
  * @returns {number} The integer value of the mark.
  */
-function msaGetMarkValue_(mark) {
-  const tokens = String(mark || "").match(/[AMRN]\d+/g);
-  if (!tokens) return 1; // Default for non-standard marks like AG
+function msaGetMarkValue_(marks) {
+  const markArray = marks || [];
+  if (markArray.length === 0) return 0;
 
-  return tokens.reduce((sum, token) => {
+  return markArray.reduce((sum, token) => {
+    if (token === 'AG') return sum + 1; // AG is often worth 1 mark.
     const m = token.match(/\d+$/);
     return sum + (m ? parseInt(m[0], 10) : 0);
   }, 0);
