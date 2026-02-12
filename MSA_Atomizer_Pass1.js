@@ -148,44 +148,39 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
         const markInfo = msaDetectMarkTag_(line);
         // MARK-ONLY line (no requirementPart)
         if (markInfo && !markInfo.requirementPart) {
-            // If we have requirement text in the buffer, this mark terminates it.
-            if (buffer.length > 0) {
-                msaLog_(`Pass1: Mark-only line [${markInfo.marks.join(',')}] is flushing buffer.`);
-                flushBuffer(markInfo.marks, i);
-                continue;
-            }
-
-            // If no buffer, this is an "orphan" mark. Use lookahead to decide where it belongs.
-            let nextLine = "";
-            for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
-                const l = (lines[j] || "").trim();
-                if (l) {
-                    nextLine = l;
-                    break;
-                }
-            }
-
-            const isNextLineAnswerLike = /^\s*=?\s*([nx]\s*=|=|\d|\\\[|\\\(|S_\d+)/.test(nextLine);
-            const isNextLineBoundary = /^\s*(METHOD|EITHER|OR|THEN|\(\s*[a-z]\s*\)|\(\s*[ivx]+\s*\)\s*)/i.test(nextLine);
-
-            // If next line looks like an answer, hold the mark for it.
-            if (isNextLineAnswerLike && !isNextLineBoundary) {
-                msaLog_(`Pass1: Mark [${markInfo.marks.join(',')}] is PENDING for next line: "${nextLine.slice(0, 30)}"`);
-                pendingMarks.push(...markInfo.marks);
-                continue;
-            }
-            // Otherwise, attach to the previous point if it exists.
-            else if (lastPoint) {
-                msaLog_(`Pass1: Attaching orphan mark(s) [${markInfo.marks.join(',')}] to previous point (no answer-like next line).`);
-                lastPoint.marks.push(...markInfo.marks);
-                continue;
-            }
-            // If no previous point and next line isn't an answer, we must hold it.
-            else {
-                msaLog_(`Pass1: Found pending mark(s) [${markInfo.marks.join(',')}] on line ${i} (no previous point and no answer-like next line).`);
-                pendingMarks.push(...markInfo.marks);
-                continue;
-            }
+             // If we have a buffer, this mark terminates it.
+             if (buffer.length > 0) {
+                 msaLog_(`Pass1: Mark-only line [${markInfo.marks.join(',')}] is flushing buffer.`);
+                 flushBuffer(markInfo.marks, i);
+                 continue;
+             }
+ 
+             // If no buffer, this is an "orphan" mark.
+             // If it follows a point, it's likely the answer mark for that point's work.
+             // Create a NEW point for it.
+             if (lastPoint && lastPoint.requirement) {
+                 msaLog_(`Pass1: Creating new answer point for mark(s) [${markInfo.marks.join(',')}] from previous requirement.`);
+                 
+                 const answerReq = msaExtractAnswerTail_(lastPoint.requirement);
+ 
+                 const newPt = {
+                     page: pageNum,
+                     part: lastPoint.part,
+                     branch: lastPoint.branch,
+                     marks: markInfo.marks,
+                     requirement: answerReq || "Answer from previous step", // Fallback requirement
+                     notes: [],
+                     source_line_index: i
+                 };
+                 points.push(newPt);
+                 lastPoint = newPt; // This new answer point is now the last point.
+                 continue;
+             }
+ 
+             // If no buffer and no lastPoint, it's a pending mark for the *next* requirement.
+             msaLog_(`Pass1: Found pending mark(s) [${markInfo.marks.join(',')}] on line ${i} (no current buffer or last point).`);
+             pendingMarks.push(...markInfo.marks);
+             continue;
         }
 
         if (markInfo && markInfo.requirementPart) {
@@ -195,12 +190,45 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
         }
 
         if (line.trim()) {
+            // Unmarked final answer rule
+            if (lastPoint && lastPoint.marks.some(m => m.startsWith('A')) && /^\s*n\s*=\s*\d+\s*$/.test(line.trim())) {
+                msaLog_(`Pass1: Appending unmarked answer "${line.trim()}" to previous A-point's requirement.`);
+                lastPoint.requirement = line.trim(); // Replace requirement with the more specific answer
+                // Don't add to buffer, we've consumed it.
+                continue; 
+            }
             buffer.push(line);
         }
     }
 
     flushBuffer([], lines.length);
     return points;
+}
+
+/**
+ * Extracts the "answer" part from a requirement block.
+ * It looks for the last line that seems like a final calculation or result.
+ * @param {string} requirement The full requirement text block.
+ * @returns {string} The extracted answer line, or a fallback.
+ */
+function msaExtractAnswerTail_(requirement) {
+    if (!requirement) return "";
+    // Split by actual newlines and also by LaTeX newlines
+    const lines = requirement.split(/\\\\\r?\n|\r?\n|\\\\/);
+    for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        // Check if it looks like an answer (starts with =, n=, or is just a number)
+        if (/^\s*=?\s*([nx]\s*=|=|\d)/.test(line) || /^-?\d+(\.\d+)?$/.test(line)) {
+            return line;
+        }
+    }
+    // Fallback: if no specific answer-like tail is found, return the last non-empty line.
+    for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim();
+        if (line) return line;
+    }
+    return ""; // Should not be reached if requirement is not empty.
 }
 
 function msaDetectMarkTag_(line) {
