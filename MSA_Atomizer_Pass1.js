@@ -62,6 +62,28 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     // This regex now captures combinations of part markers, allowing for spaces between them, e.g., "(a) (i)"
     const mPart = line.match(/^\s*((?:\(\s*[a-z]\s*\)|\(\s*[ivx]+\s*\)\s*)+)/i);
     if (mPart) {
+      // Rule C & D: Before changing part, flush buffer of notes/meta to the last point.
+      if (buffer.length > 0 && lastPoint) {
+        const notesAndMeta = [];
+        const remainingBuffer = [];
+        buffer.forEach(l => {
+          // Identify notes, "Accept", "Award", or "[x marks]" lines.
+          if (/^\s*(Note:|Accept|Award|\[\s*\d+\s*marks?\s*\]|Total)/i.test(l)) {
+            notesAndMeta.push(l.trim());
+          } else {
+            remainingBuffer.push(l);
+          }
+        });
+
+        if (notesAndMeta.length > 0) {
+          lastPoint.notes = (lastPoint.notes || []).concat(notesAndMeta);
+        }
+        if (remainingBuffer.length > 0) {
+          warnings.push(`Pass1: Dangling requirement text found before new part: "${remainingBuffer.join(' ')}"`);
+        }
+      }
+      buffer = []; // Always clear buffer on part change to prevent bleed.
+
       let newPart;
       const rawPart = mPart[1].replace(/[\s\(\)]/g, "").toLowerCase();
 
@@ -97,6 +119,17 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
     // Mark-tag line?
     const markInfo = msaDetectMarkTag_(line);
     if (markInfo) {
+      // Rule A & B: Handle "orphan" marks by attaching them to the previous point.
+      const isOrphan = !markInfo.requirementPart && buffer.length === 0;
+      if (isOrphan && lastPoint && lastPoint.part === part && lastPoint.branch === branch && (i - lastPoint.source_line_index) < 4) {
+        // This is an orphan mark that should be attached.
+        // Combine marks (e.g., "M1" + "A1" -> "M1A1") for Pass 2 to handle.
+        lastPoint.mark += markInfo.mark;
+        lastPoint.mark = msaNormalizeMarkToken_(lastPoint.mark);
+        lastPoint.source_line_index = i; // Update line index to the latest mark
+        continue; // Done with this line, move to the next.
+      }
+
       // If the mark was found at the end of a line with content,
       // add that content to the buffer before creating the point.
       if (markInfo.requirementPart) {
@@ -155,6 +188,20 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
   }
 
   return points;
+}
+
+/**
+ * Normalizes a mark token by removing parentheses, whitespace, and commas.
+ * e.g., "(A1, A1)" -> "A1A1"
+ * @param {string} mark The raw mark string.
+ * @returns {string} The normalized mark string.
+ */
+function msaNormalizeMarkToken_(mark) {
+  let s = (mark == null) ? "" : String(mark).trim();
+  if (s.startsWith("(") && s.endsWith(")")) {
+    s = s.substring(1, s.length - 1).trim();
+  }
+  return s.replace(/[\s,;]+/g, "");
 }
 
 function msaDetectMarkTag_(line) {
