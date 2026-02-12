@@ -62,9 +62,15 @@
             <h4>Original Google Doc</h4>
             <iframe id="compare-iframe-left" style="width: 100%; height: 100%; border: 1px solid #ccc;"></iframe>
           </div>
-          <div style="flex: 1;">
-            <h4>Rendered OCR Preview</h4>
-            <iframe id="compare-iframe-right" style="width: 100%; height: 100%; border: 1px solid #ccc;"></iframe>
+          <div style="flex: 1; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <h4 id="right-pane-title">Rendered OCR Preview</h4>
+              <button id="toggle-view-btn" style="display: none; margin-bottom: 5px;">Show Structured View</button>
+            </div>
+            <div style="flex-grow: 1; position: relative;">
+              <iframe id="compare-iframe-right" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 1px solid #ccc;"></iframe>
+              <iframe id="structured-preview-frame" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 1px solid #ccc; display: none;"></iframe>
+            </div>
           </div>
         </div>
         <br>
@@ -168,7 +174,47 @@
           if (data.status === 'SUCCESS') {
             document.getElementById('compare-modal-title').textContent = `Compare: ${questionTitle}`;
             document.getElementById('compare-iframe-left').src = data.sourceDocUrl;
-            document.getElementById('compare-iframe-right').srcdoc = data.previewHtml;
+
+            // --- DUAL PREVIEW LOGIC ---
+            const previewFrame = document.getElementById('compare-iframe-right');
+            const structuredFrame = document.getElementById('structured-preview-frame');
+            const toggleBtn = document.getElementById('toggle-view-btn');
+            const rightPaneTitle = document.getElementById('right-pane-title');
+
+            // Always populate the original preview
+            previewFrame.srcdoc = data.previewHtml;
+
+            if (data.structuredPreviewHtml) {
+              // If structured view exists, enable toggling
+              structuredFrame.srcdoc = data.structuredPreviewHtml;
+              toggleBtn.style.display = 'inline-block';
+              
+              // Reset to default view state
+              previewFrame.style.display = 'block';
+              structuredFrame.style.display = 'none';
+              toggleBtn.textContent = 'Show Structured View';
+              rightPaneTitle.textContent = 'Rendered OCR Preview';
+
+              toggleBtn.onclick = () => { // Use onclick to avoid adding multiple listeners
+                const isStructuredView = structuredFrame.style.display !== 'none';
+                if (isStructuredView) {
+                  structuredFrame.style.display = 'none';
+                  previewFrame.style.display = 'block';
+                  toggleBtn.textContent = 'Show Structured View';
+                  rightPaneTitle.textContent = 'Rendered OCR Preview';
+                } else {
+                  structuredFrame.style.display = 'block';
+                  previewFrame.style.display = 'none';
+                  toggleBtn.textContent = 'Show Original View';
+                  rightPaneTitle.textContent = 'Structured (Requirement/Mark) View';
+                }
+              };
+            } else {
+              // If no structured view, just show the original and hide the button
+              toggleBtn.style.display = 'none';
+            }
+            // --- END DUAL PREVIEW LOGIC ---
+
             document.getElementById('compare-modal-backdrop').style.display = 'block';
           } else if (data.status === 'NOT_PROCESSED') {
             log(data.message, 'warn');
