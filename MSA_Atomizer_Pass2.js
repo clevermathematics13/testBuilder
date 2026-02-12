@@ -22,22 +22,16 @@ function msaAtomizerPass2_(pass1, ocrByPage) {
 
   for (var i = 0; i < (out.points || []).length; i++) {
     var p = JSON.parse(JSON.stringify(out.points[i]));
-    p.mark = msaNormalizeMarkToken_(p.mark);
+    p.marks = p.marks || [];
 
-    // Attempt to split any compound mark (e.g., "A1A1", "A2N2")
-    const splitTokens = msaSplitCompoundMark_(p.mark);
+    const isCompound = p.marks.length > 1;
 
-    if (splitTokens) {
+    if (isCompound) {
       let splitPoints = null;
 
       // If it's a double-same-token (A1A1), try the smart note-based split first.
-      if (msaIsDoubleSameToken_(p.mark)) {
+      if (msaIsDoubleSameToken_(p.marks)) {
         splitPoints = msaTrySplitDoubleMarkUsingNote_(p, ocrByPage);
-      }
-
-      // If smart split failed or wasn't applicable, do a simple split.
-      if (!splitPoints) {
-        splitPoints = msaSimpleSplit_(p, splitTokens);
       }
 
       // Add the newly created points to our list
@@ -51,7 +45,7 @@ function msaAtomizerPass2_(pass1, ocrByPage) {
       } else {
         // This case is unlikely but safe: splitting was attempted but failed.
         // Keep the original point and add a warning.
-        out.warnings.push("Pass2: Could not split compound mark '" + p.mark + "' for point id=" + (p.id || "(no id)"));
+        out.warnings.push("Pass2: Could not smart-split compound mark '" + p.marks.join('') + "' for point id=" + (p.id || "(no id)"));
       }
     }
 
@@ -66,46 +60,14 @@ function msaAtomizerPass2_(pass1, ocrByPage) {
 }
 
 /**
- * Splits a compound mark string like "A1A1N2" into an array of tokens ["A1", "A1", "N2"].
- * Returns null if it's not a compound mark (i.e., contains only one token).
- */
-function msaSplitCompoundMark_(mark) {
-  // Matches one or more mark tokens (A1, M2, N5, etc.)
-  const tokens = String(mark || "").match(/[AMRN]\d+/g);
-  if (tokens && tokens.length > 1) {
-    return tokens;
-  }
-  return null; // Not a compound mark
-}
-
-/**
- * Converts variants like "(A1)" or "A1, A1" or "A1 A1" to "A1A1" where appropriate.
- */
-function msaNormalizeMarkToken_(mark) {
-  var s = (mark == null) ? "" : String(mark);
-  s = s.trim();
-
-  // strip parentheses
-  if (s.charAt(0) === "(" && s.charAt(s.length - 1) === ")") {
-    s = s.substring(1, s.length - 1).trim();
-  }
-
-  // normalize separators
-  s = s.replace(/\s+/g, "");     // remove spaces
-  s = s.replace(/,/g, "");       // remove commas
-  s = s.replace(/;/g, "");       // remove semicolons
-
-  return s;
-}
-
-/**
  * True if mark looks like A1A1 / M2M2 / N2N2 etc (same token repeated twice).
  */
-function msaIsDoubleSameToken_(mark) {
-  if (!mark) return false;
-  // Example: A1A1, M2M2, N2N2
-  var m = String(mark).match(/^([A-Z]\d+)\1$/);
-  return !!m;
+function msaIsDoubleSameToken_(marks) {
+  if (!marks || marks.length !== 2) {
+    return false;
+  }
+  // Check if it's an array of two identical strings, e.g., ["A1", "A1"]
+  return marks[0] === marks[1] && /^[AMRN]\d+$/.test(marks[0]);
 }
 
 /**
@@ -162,14 +124,14 @@ function msaTrySplitDoubleMarkUsingNote_(point, ocrByPage) {
   var left = msaCleanSplitText_(m[1]);
   var right = msaCleanSplitText_(m[2]);
 
-  // Original token like "A1A1" -> new marks are "A1"
-  var baseToken = String(point.mark).match(/^([A-Z]\d+)\1$/)[1];
+  // Original marks like ["A1", "A1"] -> new marks are ["A1"]
+  var baseToken = point.marks[0];
 
   var p1 = JSON.parse(JSON.stringify(point));
   var p2 = JSON.parse(JSON.stringify(point));
 
-  p1.mark = baseToken;
-  p2.mark = baseToken;
+  p1.marks = [baseToken];
+  p2.marks = [baseToken];
 
   // Better IDs (stable + readable)
   var baseId = point.id || ("p" + pageNum + "_split");
@@ -191,31 +153,6 @@ function msaTrySplitDoubleMarkUsingNote_(point, ocrByPage) {
 }
 
 /**
- * A fallback splitter that creates multiple points from tokens, duplicating the requirement.
- * Used for cases like A2N2 or A1A1 where no "Award..." note is found.
- */
-function msaSimpleSplit_(point, tokens) {
-  const splitPoints = [];
-  const baseId = point.id || ("p" + point.page + "_split");
-
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    const pNew = JSON.parse(JSON.stringify(point));
-
-    pNew.mark = token;
-    pNew.id = baseId + "_" + String.fromCharCode(65 + i); // _A, _B, etc.
-
-    // Add a note indicating this was a simple mechanical split.
-    pNew.notes = (pNew.notes || []).slice();
-    pNew.notes.push("Pass2: Simple split from original mark '" + point.mark + "'.");
-
-    splitPoints.push(pNew);
-  }
-
-  return splitPoints;
-}
-
-function msaCleanSplitText_(s) {
   var t = (s == null) ? "" : String(s);
   t = t.replace(/^a\s+/i, "");
   t = t.replace(/\s+/g, " ").trim();
@@ -232,11 +169,11 @@ function msaSafeLineIndex_(point, lines) {
   }
 
   // fallback: search for the mark token in text
-  var token = msaNormalizeMarkToken_(point && point.mark);
-  if (token) {
+  var tokens = (point && point.marks) || [];
+  if (tokens.length > 0) {
     for (var i = 0; i < lines.length; i++) {
-      var l = msaNormalizeMarkToken_(String(lines[i] || ""));
-      if (l === token) return i;
+      var l = String(lines[i] || "").replace(/[\s(),;]/g, "");
+      if (l === tokens.join('')) return i;
     }
   }
   return 0;

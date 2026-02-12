@@ -46,162 +46,112 @@ function msaPreprocessLines_(text, rules) {
 }
 
 function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
-  let part = "unknown";
-  let lastLetterPart = "unknown"; // 🟢 NEW: State for the last primary part, e.g., 'a'
-  let branch = null;
+    let part = "unknown";
+    let lastLetterPart = "unknown";
+    let branch = null;
+    let buffer = [];
+    let lastPoint = null;
+    const points = [];
+    let pendingMarks = []; // Holds marks from mark-only lines.
 
-  let buffer = [];
-  let lastPoint = null;
-
-  const points = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    let line = String(lines[i] || "");
-
-    // Part detector: (a), (b), etc.
-    // This regex now captures combinations of part markers, allowing for spaces between them, e.g., "(a) (i)"
-    const mPart = line.match(/^\s*((?:\(\s*[a-z]\s*\)|\(\s*[ivx]+\s*\)\s*)+)/i);
-    if (mPart) {
-      // Rule C & D: Before changing part, flush buffer of notes/meta to the last point.
-      if (buffer.length > 0 && lastPoint) {
-        const notesAndMeta = [];
-        const remainingBuffer = [];
-        buffer.forEach(l => {
-          // Identify notes, "Accept", "Award", or "[x marks]" lines.
-          if (/^\s*(Note:|Accept|Award|\[\s*\d+\s*marks?\s*\]|Total)/i.test(l)) {
-            notesAndMeta.push(l.trim());
-          } else {
-            remainingBuffer.push(l);
-          }
-        });
-
-        if (notesAndMeta.length > 0) {
-          lastPoint.notes = (lastPoint.notes || []).concat(notesAndMeta);
+    const flushBuffer = (terminatingMarks = [], lineIndex) => {
+        if (buffer.length === 0 && pendingMarks.length > 0 && lastPoint) {
+            // Pending marks with no buffer attach to the previous point.
+            msaLog_(`Pass1: Attaching pending marks [${pendingMarks.join(',')}] to previous point as no new requirement was found.`);
+            lastPoint.marks.push(...pendingMarks);
+            pendingMarks = [];
+            return;
         }
-        if (remainingBuffer.length > 0) {
-          warnings.push(`Pass1: Dangling requirement text found before new part: "${remainingBuffer.join(' ')}"`);
+        if (buffer.length === 0) return;
+
+        let allMarks = [...pendingMarks, ...terminatingMarks];
+        if (allMarks.length === 0) {
+            warnings.push(`Pass1: Dangling buffer with no mark: "${buffer.join(' ')}"`);
+            buffer = [];
+            return;
         }
-      }
-      buffer = []; // Always clear buffer on part change to prevent bleed.
 
-      let newPart;
-      const rawPart = mPart[1].replace(/[\s\(\)]/g, "").toLowerCase();
+        const pt = {
+            page: pageNum,
+            part: part,
+            branch: branch,
+            marks: allMarks,
+            requirement: msaTrimBlock_(buffer.join("\n")),
+            notes: [],
+            source_line_index: lineIndex
+        };
 
-      // If the part is purely roman numerals (i, ii, v), it's a sub-part.
-      if (/^[ivx]+$/.test(rawPart)) {
-        // This is a sub-part like (ii) without a letter.
-        newPart = lastLetterPart + rawPart;
-      } else {
-        // This is a primary part like (a) or (a)(i)
-        newPart = rawPart;
-        const primaryLetterMatch = rawPart.match(/^[a-z]/);
-        if (primaryLetterMatch) lastLetterPart = primaryLetterMatch[0];
-      }
-      part = newPart;
-      branch = null; // Unconditionally reset branch on any new part.
-      // Strip the part marker from the line so it's not duplicated in the requirement,
-      // but allow the rest of the line to be processed for marks.
-      line = line.substring(mPart[0].length).trim();
+        // Post-process to extract notes from the requirement.
+        const reqLines = (pt.requirement || "").split('\n');
+        const finalReqLines = [];
+        let isStrippingNotes = true;
+        for (const currentLine of reqLines) {
+            if (isStrippingNotes && /^\s*(Note:|Accept|Award|\[\s*\d+\s*marks?\s*\]|Total)/i.test(currentLine)) {
+                pt.notes.push(currentLine.trim());
+            } else {
+                isStrippingNotes = false;
+                finalReqLines.push(currentLine);
+            }
+        }
+        pt.requirement = finalReqLines.join('\n').trim();
+
+        if (pt.requirement || pt.marks.length > 1) {
+            points.push(pt);
+            lastPoint = pt;
+        }
+
+        buffer = [];
+        pendingMarks = [];
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        let line = String(lines[i] || "");
+
+        const mPart = line.match(/^\s*((?:\(\s*[a-z]\s*\)|\(\s*[ivx]+\s*\)\s*)+)/i);
+        if (mPart) {
+            flushBuffer([], i);
+            const rawPart = mPart[1].replace(/[\s\(\)]/g, "").toLowerCase();
+            if (/^[ivx]+$/.test(rawPart)) {
+                part = lastLetterPart + rawPart;
+            } else {
+                part = rawPart;
+                const primaryLetterMatch = rawPart.match(/^[a-z]/);
+                if (primaryLetterMatch) lastLetterPart = primaryLetterMatch[0];
+            }
+            branch = null;
+            line = line.substring(mPart[0].length).trim();
+        }
+
+        if (/^\s*EITHER\s*$/i.test(line)) { flushBuffer([], i); branch = "EITHER"; continue; }
+        if (/^\s*OR\s*$/i.test(line)) { flushBuffer([], i); branch = "OR"; continue; }
+        if (/^\s*THEN\s*$/i.test(line)) { flushBuffer([], i); branch = "THEN"; continue; }
+        const mMethod = line.match(/^\s*METHOD\s+(\d+)\s*$/i);
+        if (mMethod) {
+            flushBuffer([], i);
+            branch = "METHOD" + mMethod[1];
+            continue;
+        }
+
+        const markInfo = msaDetectMarkTag_(line);
+        if (markInfo && !markInfo.requirementPart) {
+            pendingMarks.push(...markInfo.marks);
+            msaLog_(`Pass1: Found pending mark(s) [${markInfo.marks.join(',')}] on line ${i}.`);
+            continue;
+        }
+
+        if (markInfo && markInfo.requirementPart) {
+            buffer.push(markInfo.requirementPart);
+            flushBuffer(markInfo.marks, i);
+            continue;
+        }
+
+        if (line.trim()) {
+            buffer.push(line);
+        }
     }
 
-    // Branch markers
-    if (/^\s*EITHER\s*$/i.test(line)) { branch = "EITHER"; buffer = []; continue; }
-    if (/^\s*OR\s*$/i.test(line))     { branch = "OR";     buffer = []; continue; }
-    if (/^\s*THEN\s*$/i.test(line))   { branch = "THEN";   continue; }
-    const mMethod = line.match(/^\s*METHOD\s+(\d+)\s*$/i);
-    if (mMethod) {
-      // When a new method starts, it's a distinct branch.
-      branch = "METHOD" + mMethod[1];
-      buffer = []; // Clear buffer for the new method's context.
-      continue;
-    }
-
-    // Mark-tag line?
-    const markInfo = msaDetectMarkTag_(line);
-    if (markInfo) {
-      // Rule A & B: Handle "orphan" marks by attaching them to the previous point.
-      const isOrphan = !markInfo.requirementPart && buffer.length === 0;
-      if (isOrphan && lastPoint && lastPoint.part === part && lastPoint.branch === branch && (i - lastPoint.source_line_index) < 4) {
-        // This is an orphan mark that should be attached.
-        // Combine marks (e.g., "M1" + "A1" -> "M1A1") for Pass 2 to handle.
-        lastPoint.mark += markInfo.mark;
-        lastPoint.mark = msaNormalizeMarkToken_(lastPoint.mark);
-        lastPoint.source_line_index = i; // Update line index to the latest mark
-        continue; // Done with this line, move to the next.
-      }
-
-      // If the mark was found at the end of a line with content,
-      // add that content to the buffer before creating the point.
-      if (markInfo.requirementPart) {
-        buffer.push(markInfo.requirementPart);
-      }
-
-      let requirement = msaTrimBlock_(buffer.join("\n"));
-      buffer = [];
-
-      const pt = {
-        page: pageNum,
-        part: part,
-        branch: branch,
-        mark: markInfo.mark, // e.g. "A1A1" or "M1"
-        requirement: requirement,
-        notes: [],
-        source_line_index: i
-      };
-
-      // Post-process the requirement to extract any leading note lines.
-      // This prevents "Note:" text from being part of the core requirement.
-      const reqLines = (pt.requirement || "").split('\n');
-      const finalReqLines = [];
-      let isStrippingNotes = true;
-      for (let k = 0; k < reqLines.length; k++) {
-        const currentLine = reqLines[k];
-        // Only strip a contiguous block of notes from the beginning.
-        if (isStrippingNotes && /^\s*(Note:|Accept|Award)/i.test(currentLine)) {
-          pt.notes.push(currentLine.trim());
-        } else {
-          isStrippingNotes = false; // Stop stripping after the first non-note line.
-          finalReqLines.push(currentLine);
-        }
-      }
-      pt.requirement = finalReqLines.join('\n').trim();
-
-      // The guard below was removed because it was too aggressive. It correctly ignored simple marks
-      // with empty requirements, but it also incorrectly dropped valid marks that appeared on their
-      // own line (e.g., two consecutive "A1" lines). It is better to extract the point, even if its
-      // requirement is empty, and allow the scoring function to penalize its low structure score.
-      // if (!pt.requirement && !msaIsCompoundMark_(pt.mark)) {
-      //   continue;
-      // }
-
-      if (skipMapByPart && skipMapByPart[part]) {
-        pt.skip_autograde = true;
-      }
-
-      points.push(pt);
-      lastPoint = pt;
-      continue;
-    }
-
-    // Otherwise accumulate as requirement context
-    if (line.trim() !== "") buffer.push(line);
-  }
-
-  return points;
-}
-
-/**
- * Normalizes a mark token by removing parentheses, whitespace, and commas.
- * e.g., "(A1, A1)" -> "A1A1"
- * @param {string} mark The raw mark string.
- * @returns {string} The normalized mark string.
- */
-function msaNormalizeMarkToken_(mark) {
-  let s = (mark == null) ? "" : String(mark).trim();
-  if (s.startsWith("(") && s.endsWith(")")) {
-    s = s.substring(1, s.length - 1).trim();
-  }
-  return s.replace(/[\s,;]+/g, "");
+    flushBuffer([], lines.length);
+    return points;
 }
 
 function msaDetectMarkTag_(line) {
@@ -209,7 +159,7 @@ function msaDetectMarkTag_(line) {
 
   // Case 1: Handle simple cases like (AG) or AG
   if (/^\(?\s*AG\s*\)?$/.test(s)) {
-    return { mark: "AG", requirementPart: null };
+    return { marks: ["AG"], requirementPart: null };
   }
 
   // Find all potential mark tokens on the line
@@ -223,7 +173,7 @@ function msaDetectMarkTag_(line) {
   const stripped = s.replace(/[AMRN]\d+/g, "").replace(/[\(\),;]/g, "").trim();
   if (stripped.length === 0) {
     return {
-      mark: markTokens.join(""),
+      marks: markTokens,
       requirementPart: null // Indicates no requirement on this line
     };
   }
@@ -246,22 +196,13 @@ function msaDetectMarkTag_(line) {
     if (marksPartStripped.length === 0) {
       // This is a valid end-of-line mark construct.
       return {
-        mark: marksPartTokens.join(""),
+        marks: markTokens,
         requirementPart: requirementPart
       };
     }
   }
 
   return null;
-}
-
-/**
- * Helper to check if a mark string is compound (e.g., "A1A1", "M1A1").
- */
-function msaIsCompoundMark_(mark) {
-  // Re-uses the same logic as the Pass 2 splitter.
-  const tokens = String(mark || "").match(/[AMRN]\d+/g);
-  return tokens && tokens.length > 1;
 }
 
 function msaTrimBlock_(s) {
@@ -275,11 +216,11 @@ function msaAssignIds_(points) {
   const counters = {};
   for (let i = 0; i < points.length; i++) {
     const pt = points[i];
-    const key = ["p" + msaPad2_(pt.page), pt.part || "x", pt.mark || "X", pt.branch || ""].join("_");
+    const key = ["p" + msaPad2_(pt.page), pt.part || "x", (pt.marks || ["X"]).join(''), pt.branch || ""].join("_");
     counters[key] = (counters[key] || 0) + 1;
     const n = counters[key];
 
-    let id = "p" + msaPad2_(pt.page) + "_" + msaPad2_(i + 1) + "_" + (pt.part || "x") + "_" + (pt.mark || "X");
+    let id = "p" + msaPad2_(pt.page) + "_" + msaPad2_(i + 1) + "_" + (pt.part || "x") + "_" + ((pt.marks || ["X"]).join(''));
     if (pt.branch) id += "_" + pt.branch;
     if (n > 1) id += "_" + n;
 
