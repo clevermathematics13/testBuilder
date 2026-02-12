@@ -98,26 +98,39 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
  * @returns {{awarded: boolean, score: number}}
  */
 function srgMatchRequirement_(studentOcrText, requirementText) {
-  const clean = (text) => new Set(String(text || "").toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2));
+  // 1. Extract all numbers (including decimals and negatives) from both texts.
+  const getNumbers = (text) => (String(text || "").match(/-?\d+(\.\d+)?/g) || []);
+  const studentNumbers = new Set(getNumbers(studentOcrText));
+  const requirementNumbers = getNumbers(requirementText);
 
-  const studentWords = clean(studentOcrText);
-  const requirementWords = Array.from(clean(requirementText)); // Convert Set to Array to get .length
+  // 2. If the requirement contains numbers, prioritize matching them.
+  if (requirementNumbers.length > 0) {
+    const foundNumbers = requirementNumbers.filter(num => studentNumbers.has(num));
+    const numberMatchRatio = foundNumbers.length / requirementNumbers.length;
 
-  if (requirementWords.length === 0) {
-    return { awarded: false, score: 0 };
+    // If all required numbers are found, it's a very strong match.
+    if (numberMatchRatio === 1.0) {
+      return { awarded: true, score: 1.0 };
+    }
+    // If some but not all numbers are found, it's a partial match.
+    // We can use this score directly.
+    return { awarded: numberMatchRatio > 0.8, score: numberMatchRatio };
   }
 
-  let foundCount = 0;
-  requirementWords.forEach(word => {
-    if (studentWords.has(word)) {
-      foundCount++;
-    }
-  });
+  // 3. Fallback to keyword matching for non-numeric requirements (e.g., "evidence of substitution").
+  const getWords = (text) => new Set(String(text || "").toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 3 && !/^\d+$/.test(w)));
+  const studentWords = getWords(studentOcrText);
+  const requirementWords = Array.from(getWords(requirementText));
 
-  const matchRatio = foundCount / requirementWords.length;
-  const THRESHOLD = 0.75; // 75% of keywords must match to award the point.
+  if (requirementWords.length > 0) {
+    const foundWords = requirementWords.filter(word => studentWords.has(word));
+    const wordMatchRatio = foundWords.length / requirementWords.length;
+    const THRESHOLD = 0.75; // 75% of keywords must match.
+    return { awarded: wordMatchRatio >= THRESHOLD, score: wordMatchRatio };
+  }
 
-  return { awarded: matchRatio >= THRESHOLD, score: matchRatio };
+  // 4. If the requirement has no numbers and no keywords, we cannot grade it automatically.
+  return { awarded: false, score: 0 };
 }
 
 /**
