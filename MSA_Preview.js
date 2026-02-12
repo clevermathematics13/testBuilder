@@ -195,7 +195,9 @@ function _buildStructuredHtmlFromText_(text) {
   });
   const allTokens = textWithPlaceholders.split(/\r?\n/).filter(line => line.trim() !== '');
   const rows = [];
+  let pendingMarks = []; // NEW: Hold marks for the next line.
   const markRegex = /(\(\s*\b[AMRGN]\d+\b\s*\)|\b[AMRGN]\d+\b|\[\s*(?:Total\s*)?\d+\s*marks?\s*\]|AG|\(AG\))/g;
+  
   const isMarkOnly = (line) => {
     if (!line) return false;
     const marks = line.match(markRegex);
@@ -203,6 +205,12 @@ function _buildStructuredHtmlFromText_(text) {
     const stripped = line.replace(markRegex, '').replace(/[\s,;()]/g, '');
     return stripped === '';
   };
+
+  const isAnswerLike = (line) => {
+    const normalized = (line || "").replace(/^\\\(\s*|\s*\\\)$/g, '').trim();
+    return /^\s*=?\s*([nx]\s*=|=|\d)/.test(normalized);
+  };
+
   for (let i = 0; i < allTokens.length; i++) {
     const line = allTokens[i];
     const methodMatch = line.match(/^METHOD\s+(\d+)$/i);
@@ -212,8 +220,19 @@ function _buildStructuredHtmlFromText_(text) {
     }
     if (isMarkOnly(line)) {
       const marks = line.match(markRegex) || [];
-      let lastMarkableRow = rows.slice().reverse().find(r => r.isMarkable);
-      if (lastMarkableRow) lastMarkableRow.marks.push(...marks);
+      let nextContentLine = '';
+      for (let j = i + 1; j < Math.min(i + 3, allTokens.length); j++) {
+        if (allTokens[j]) {
+          nextContentLine = allTokens[j];
+          break;
+        }
+      }
+      if (isAnswerLike(nextContentLine)) {
+        pendingMarks.push(...marks);
+      } else {
+        let lastMarkableRow = rows.slice().reverse().find(r => r.isMarkable);
+        if (lastMarkableRow) lastMarkableRow.marks.push(...marks);
+      }
       continue;
     }
     if (/^Note:/i.test(line)) {
@@ -228,7 +247,8 @@ function _buildStructuredHtmlFromText_(text) {
       continue;
     }
     let main = line;
-    let currentMarks = [];
+    let currentMarks = [...pendingMarks];
+    pendingMarks = [];
     let primaryPart = '';
     let secondaryPart = '';
     let isNewMainPart = false;
