@@ -59,6 +59,10 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
   const studentText = studentOcr.text || "";
   msaLog_("SRG: Student OCR text length: " + studentText.length);
 
+  // Save the student's OCR text to a file for easy review.
+  const studentOcrFilename = `student_work_${studentWorkImageId}_ocr.txt`;
+  msaUpsertTextFile_(questionFolder, studentOcrFilename, studentText);
+
   // 3. Grade each point against the student's work
   const results = [];
   markscheme.points.forEach(point => {
