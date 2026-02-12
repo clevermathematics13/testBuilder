@@ -244,8 +244,8 @@ function msaGetMarkValue_(marks) {
   if (markArray.length === 0) return 0;
 
   return markArray.reduce((sum, token) => {
-    if (token === 'AG') return sum + 1; // AG is often worth 1 mark.
-    const m = token.match(/\d+$/);
+    if (token === 'AG' || token === '(AG)') return sum + 1; // AG is often worth 1 mark.
+    const m = token.match(/\d+/); // Find any sequence of digits in the token.
     return sum + (m ? parseInt(m[0], 10) : 0);
   }, 0);
 }
