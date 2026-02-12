@@ -286,12 +286,17 @@ function _escapeRegExp(string) {
 
 function msaDetectMarkTag_(line) {
   const s = String(line || "").trim();
-
+  
+  // NEW: Handle single mark-only lines with/without parens first.
+  if (/^\(\s*[AMRN]\d+\s*\)$/.test(s) || /^[AMRN]\d+$/.test(s)) {
+    return { marks: [s], requirementPart: null };
+  }
+  
   // Case 1: Handle simple cases like (AG) or AG
   if (/^\(?\s*AG\s*\)?$/.test(s)) {
-    return { marks: ["AG"], requirementPart: null };
+    return { marks: [s], requirementPart: null };
   }
-
+  
   // Find all potential mark tokens on the line
   const markTokens = s.match(/[AMRN]\d+/g);
 
@@ -300,7 +305,7 @@ function msaDetectMarkTag_(line) {
   }
 
   // Case 2: Check if it's a mark-only line (e.g., "(M1)" or "A1, A1")
-  const stripped = s.replace(/[AMRN]\d+/g, "").replace(/[\(\),;]/g, "").trim();
+  const stripped = s.replace(/[AMRN]\d+/g, "").replace(/[\s,;()]/g, "").trim();
   if (stripped.length === 0) {
     return {
       marks: markTokens,
@@ -322,11 +327,11 @@ function msaDetectMarkTag_(line) {
       return null;
     }
 
-    const marksPartStripped = marksPart.replace(/[AMRN]\d+/g, "").replace(/[\(\),;]/g, "").trim();
+    const marksPartStripped = marksPart.replace(/[AMRN]\d+/g, "").replace(/[\s,;()]/g, "").trim();
     if (marksPartStripped.length === 0) {
       // This is a valid end-of-line mark construct.
       return {
-        marks: markTokens,
+        marks: marksPartTokens, // Use the tokens from inside the parens
         requirementPart: requirementPart
       };
     }
