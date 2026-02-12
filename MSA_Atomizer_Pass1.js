@@ -164,11 +164,14 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
              // If it follows a point, it's likely the answer mark for that point's work.
              // Create a NEW point for it.
              if (lastPoint && lastPoint.requirement) {
-                 const originalReq = lastPoint.requirement;
-                 const answerReq = msaFindAnswerTail_(originalReq);
+                const originalReq = lastPoint.requirement;
+                const { workText, answerText } = msaSplitWorkAndAnswer_(originalReq);
 
                  // Problem A Fix: Remove the answer from the previous point's requirement.
-                 if (answerReq) {
+                 if (answerText) {
+                    // Mutate the previous point:
+                    msaLog_(`Pass1: Extracted A1, was: ${lastPoint.requirement}`);
+                    lastPoint.requirement = workText;
                     lastPoint.requirement = originalReq.replace(new RegExp(_escapeRegExp(answerReq) + "\\s*$"), "").trim();
                     lastPoint.requirement = lastPoint.requirement.replace(/\\\\\s*$/, "").trim(); // Clean up trailing LaTeX newline
                     if (DEBUG_PASS1) {
@@ -180,10 +183,10 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
                      page: pageNum,
                      part: lastPoint.part,
                      branch: lastPoint.branch,
-                     marks: markInfo.marks,
-                     requirement: answerReq || "Final answer", // Fallback requirement
+                    marks: markInfo.marks,
+                    requirement: answerText || "Final answer", // Fallback requirement
                      notes: [],
-                     source_line_index: i
+                    source_line_index: i
                  };
                  points.push(newPt);
                  lastPoint = newPt; // This new answer point is now the last point.
@@ -205,10 +208,16 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
         if (line.trim()) {
             const trimmedLine = line.trim();
             // Problem B Fix: Normalize line by removing LaTeX wrappers before checking.
-            const normalizedLine = trimmedLine.replace(/^\\\(\s*|\s*\\\)$/g, '').trim();
+            const normalizedLine = trimmedLine.replace(/^\\\(\s*|\s*\\\)$/g, "").trim();
             const isUnmarkedAnswer = lastPoint && lastPoint.marks.some(m => m.startsWith('A')) && /^\s*n\s*=\s*\d+\s*$/.test(normalizedLine);
 
             if (DEBUG_PASS1) {
+                msaLog_(`Pass1: ${part} | ${branch} | ${lastPoint.marks.join('')} | req: ${lastPoint.requirement.split('\n').slice(-2).join(' ')}`);
+                msaLog_(`Pass1: Creating new A-point for | Marks: [${markInfo.marks.join(',')}]`);
+            }
+
+            if (DEBUG_PASS1) {
+
                 msaLog_(`Pass1: Checking unmarked line. Raw: "${trimmedLine}", Norm: "${normalizedLine}", Match: ${isUnmarkedAnswer}`);
             }
 
@@ -223,6 +232,8 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
         }
     }
 
+
+
     flushBuffer([], lines.length);
     return points;
 }
@@ -233,7 +244,7 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
  * @param {string} requirement The full requirement text block.
  * @returns {string} The extracted answer line, or a fallback.
  */
-function msaFindAnswerTail_(requirement) {
+function msaSplitWorkAndAnswer_(requirement) {
     if (!requirement) return "";
     // Split by actual newlines and also by LaTeX newlines
     const lines = requirement.split(/\\\\\r?\n|\r?\n|\\\\/);
@@ -241,16 +252,24 @@ function msaFindAnswerTail_(requirement) {
         const line = lines[i].trim();
         if (!line) continue;
         // Check if it looks like an answer (starts with =, n=, or is just a number)
-        if (/^\s*=?\s*([nx]\s*=|=|\d)/.test(line) || /^-?\d+(\.\d+)?$/.test(line)) {
-            return line;
+        if (/^\s*=?\s*([nx]\s*=|=|\d)/.test(line) || /^-?\d+(\.\d+)?$/.test(line)) {  
+            const workText = lines.slice(0, i).join("\n");
+            const answerText = line;
+            return { workText: workText, answerText: answerText };
         }
     }
     // Fallback: if no specific answer-like tail is found, return the last non-empty line.
+    let workText = "";
+    let answerText = "";
     for (let i = lines.length - 1; i >= 0; i--) {
         const line = lines[i].trim();
-        if (line) return line;
+        if (line){
+            workText = lines.slice(0, i).join("\n");
+            answerText = line;
+        }
     }
-    return ""; // Should not be reached if requirement is not empty.
+
+    return { workText: workText, answerText:answerText }; // Should not be reached if requirement is not empty.
 }
 
 function _escapeRegExp(string) {
