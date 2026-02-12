@@ -147,22 +147,35 @@ function _buildStructuredHtmlFromPoints_(points) {
   }
   let html = '';
   let lastPart = null;
+  let lastBranch = null; // Track the last branch
   for (const point of points) {
     const currentPart = point.part || 'unknown';
     if (currentPart !== lastPart) {
       html += `<div class="point-row"><div class="section-header">Question Part: ${currentPart}</div></div>`;
       lastPart = currentPart;
+      lastBranch = null; // Reset branch when part changes
     }
+
     html += '<div class="point-row">';
-    html += `<div>${point.branch ? `<div class="branch-label">${point.branch}</div>` : ''}</div>`;
+    
+    // Display branch label only if it's different from the previous point
+    let branchLabel = '';
+    if (point.branch && point.branch !== lastBranch) {
+      branchLabel = `<div class="branch-label">${point.branch}</div>`;
+    }
+    html += `<div>${branchLabel}</div>`;
+
     const sanitizedRequirement = _sanitizeForMathJax_(point.requirement);
-    html += `<div class="requirement">${sanitizedRequirement.replace(/\n/g, '<br>')}</div>`;
+    html += `<div class="requirement">${sanitizedRequirement}</div>`;
     html += `<div class="mark">${(point.marks || []).join(' ')}</div>`;
     html += '</div>';
+
     if (point.notes && point.notes.length > 0) {
       const sanitizedNotes = _sanitizeForMathJax_(point.notes.join('\n'));
-      html += `<div class="point-row"><div class="notes">${sanitizedNotes.replace(/\n/g, '<br>')}</div></div>`;
+      html += `<div class="point-row"><div class="notes">${sanitizedNotes}</div></div>`;
     }
+
+    lastBranch = point.branch; // Update lastBranch for the next iteration
   }
   return html;
 }

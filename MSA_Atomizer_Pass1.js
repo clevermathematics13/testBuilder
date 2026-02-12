@@ -165,7 +165,7 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
              // Create a NEW point for it.
              if (lastPoint && lastPoint.requirement) {
                 const originalReq = lastPoint.requirement;
-                const { workText, answerText } = msaSplitWorkAndAnswer_(originalReq);
+                const { workText, answerText } = msaSplitWorkAndAnswer_(originalReq, DEBUG_PASS1);
 
                  // Problem A Fix: Remove the answer from the previous point's requirement.
                  if (answerText) {
@@ -215,8 +215,8 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
 
             // Unmarked final answer rule
             if (isUnmarkedAnswer) {
-                msaLog_(`Pass1: Assigning unmarked answer "${trimmedLine}" to previous A-point.`);
-                lastPoint.requirement = trimmedLine; // Replace requirement with the more specific answer
+                msaLog_(`Pass1: Appending unmarked answer "${trimmedLine}" to previous A-point's requirement.`);
+                lastPoint.requirement += "\n" + trimmedLine; // Append the answer
                 // Don't add to buffer, we've consumed it.
                 continue;
             }
@@ -236,31 +236,48 @@ function msaParsePointsFromLines_(lines, pageNum, skipMapByPart, warnings) {
  * @param {string} requirement The full requirement text block.
  * @returns {string} The extracted answer line, or a fallback.
  */
-function msaSplitWorkAndAnswer_(requirement) {
+function msaSplitWorkAndAnswer_(requirement, debug) {
     if (!requirement) return { workText: "", answerText: "" };
-    // Split by actual newlines and also by LaTeX newlines
-    const lines = requirement.split(/\\\\\r?\n|\r?\n|\\\\/);
+
+    const lines = requirement.split(/\r?\n/);
+    let answerIndex = -1;
+    let answerText = "";
+
+    // Find the last "answer-like" line, ignoring LaTeX wrappers
     for (let i = lines.length - 1; i >= 0; i--) {
         const line = lines[i].trim();
-        if (!line) continue;
-        // Check if it looks like an answer (starts with =, n=, or is just a number)
-        if (/^\s*=?\s*([nx]\s*=|=|\d)/.test(line) || /^-?\d+(\.\d+)?$/.test(line)) {  
-            const workText = lines.slice(0, i).join("\n");
-            const answerText = line;
-            return { workText: workText, answerText: answerText };
+        if (!line || /^\s*\\(begin|end){array}|\\\[|\\\]\s*$/.test(line)) {
+            continue; // Skip empty lines and array wrappers
         }
-    }
-    // Fallback: if no specific answer-like tail is found, return the last non-empty line.
-    for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i].trim();
-        if (line){
-            const workText = lines.slice(0, i).join("\n");
-            const answerText = line;
-            return { workText: workText, answerText: answerText };
+
+        if (/^\s*=?\s*([nx]\s*=|=|\d)/.test(line) || /^-?\d+(\.\d+)?$/.test(line)) {
+            answerIndex = i;
+            answerText = line;
+            break;
         }
     }
 
-    return { workText: requirement, answerText: "" }; // Should not be reached if requirement is not empty.
+    if (answerIndex === -1) {
+        return { workText: requirement, answerText: "" };
+    }
+
+    // Reconstruct the work text, excluding the answer line
+    const workLines = lines.filter((_, index) => index !== answerIndex);
+    
+    // Clean trailing '\\' from the line that is now last before the end of the array
+    if (answerIndex > 0 && workLines[answerIndex - 1]) {
+        workLines[answerIndex - 1] = workLines[answerIndex - 1].replace(/\\\\\s*$/, '');
+    }
+    
+    const workText = workLines.join('\n');
+
+    if (debug) {
+        msaLog_(`msaSplitWorkAndAnswer_: workText includes \\end{array}: ${workText.includes('\\end{array}')}`);
+        msaLog_(`msaSplitWorkAndAnswer_: workText includes \\]: ${workText.includes('\\]')}`);
+        msaLog_(`msaSplitWorkAndAnswer_: answerText: "${answerText}"`);
+    }
+
+    return { workText: workText, answerText: answerText };
 }
 
 function _escapeRegExp(string) {
