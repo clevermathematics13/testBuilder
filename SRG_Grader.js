@@ -70,6 +70,7 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
     results.push({
       point_id: point.id,
       marks: point.marks,
+      details: matchResult.details,
       awarded: matchResult.awarded,
       match_score: matchResult.score,
       requirement: point.requirement,
@@ -88,6 +89,13 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
   results.forEach(res => {
     const status = res.awarded ? "✅ AWARDED" : "❌ NOT AWARDED";
     msaLog_(status + " (" + (res.marks || []).join('') + ") - Match Score: " + res.match_score.toFixed(2) + " - ID: " + res.point_id);
+    if (!res.awarded && res.details) {
+      if (res.details.type === 'numeric' && res.details.required.length > 0) {
+        msaLog_(`   > Required numbers: [${res.details.required.join(', ')}]. Found: [${res.details.found.join(', ')}]. Missing: [${res.details.missing.join(', ')}].`);
+      } else if (res.details.type === 'keyword' && res.details.required.length > 0) {
+        msaLog_(`   > Required keywords: [${res.details.required.join(', ')}]. Found: [${res.details.found.join(', ')}]. Missing: [${res.details.missing.join(', ')}].`);
+      }
+    }
   });
 
   const dt = Math.round((Date.now() - t0) / 1000);
@@ -114,11 +122,20 @@ function srgMatchRequirement_(studentOcrText, requirementText) {
 
     // If all required numbers are found, it's a very strong match.
     if (numberMatchRatio === 1.0) {
-      return { awarded: true, score: 1.0 };
+      return { awarded: true, score: 1.0, details: { type: 'numeric', required: requirementNumbers, found: foundNumbers, missing: [] } };
     }
     // If some but not all numbers are found, it's a partial match.
     // We can use this score directly.
-    return { awarded: numberMatchRatio > 0.8, score: numberMatchRatio };
+    return {
+      awarded: numberMatchRatio > 0.8,
+      score: numberMatchRatio,
+      details: {
+        type: 'numeric',
+        required: requirementNumbers,
+        found: foundNumbers,
+        missing: requirementNumbers.filter(num => !studentNumbers.has(num))
+      }
+    };
   }
 
   // 3. Fallback to keyword matching for non-numeric requirements (e.g., "evidence of substitution").
@@ -130,11 +147,20 @@ function srgMatchRequirement_(studentOcrText, requirementText) {
     const foundWords = requirementWords.filter(word => studentWords.has(word));
     const wordMatchRatio = foundWords.length / requirementWords.length;
     const THRESHOLD = 0.75; // 75% of keywords must match.
-    return { awarded: wordMatchRatio >= THRESHOLD, score: wordMatchRatio };
+    return {
+      awarded: wordMatchRatio >= THRESHOLD,
+      score: wordMatchRatio,
+      details: {
+        type: 'keyword',
+        required: requirementWords,
+        found: foundWords,
+        missing: requirementWords.filter(word => !studentWords.has(word))
+      }
+    };
   }
 
   // 4. If the requirement has no numbers and no keywords, we cannot grade it automatically.
-  return { awarded: false, score: 0 };
+  return { awarded: false, score: 0, details: { type: 'none', required: [], found: [], missing: [] } };
 }
 
 /**
