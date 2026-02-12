@@ -90,9 +90,14 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
     const status = res.awarded ? "✅ AWARDED" : "❌ NOT AWARDED";
     msaLog_(status + " (" + (res.marks || []).join('') + ") - Match Score: " + res.match_score.toFixed(2) + " - ID: " + res.point_id);
     if (!res.awarded && res.details) {
-      if (res.details.type === 'numeric' && res.details.required.length > 0) {
-        msaLog_(`   > Required numbers: [${res.details.required.join(', ')}]. Found: [${res.details.found.join(', ')}]. Missing: [${res.details.missing.join(', ')}].`);
-      } else if (res.details.type === 'keyword' && res.details.required.length > 0) {
+      if (res.details.type === 'numeric') {
+        const studentNumbers = res.details.student_numbers || [];
+        if (studentNumbers.length > 0) {
+          msaLog_(`   > Required: [${res.details.required.join(', ')}]. Student provided: [${studentNumbers.join(', ')}]. Missing from required: [${res.details.missing.join(', ')}].`);
+        } else {
+          msaLog_(`   > Required numbers: [${res.details.required.join(', ')}]. Student provided no numbers.`);
+        }
+      } else if (res.details.type === 'keyword') {
         msaLog_(`   > Required keywords: [${res.details.required.join(', ')}]. Found: [${res.details.found.join(', ')}]. Missing: [${res.details.missing.join(', ')}].`);
       }
     }
