@@ -90,14 +90,9 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
     const status = res.awarded ? "✅ AWARDED" : "❌ NOT AWARDED";
     msaLog_(status + " (" + (res.marks || []).join('') + ") - Match Score: " + res.match_score.toFixed(2) + " - ID: " + res.point_id);
     if (!res.awarded && res.details) {
-      if (res.details.type === 'numeric') {
-        const studentNumbers = res.details.student_numbers || [];
-        if (studentNumbers.length > 0) {
-          msaLog_(`   > Required: [${res.details.required.join(', ')}]. Student provided: [${studentNumbers.join(', ')}]. Missing from required: [${res.details.missing.join(', ')}].`);
-        } else {
-          msaLog_(`   > Required numbers: [${res.details.required.join(', ')}]. Student provided no numbers.`);
-        }
-      } else if (res.details.type === 'keyword') {
+      if (res.details.type === 'numeric' && res.details.required.length > 0) {
+        msaLog_(`   > Required numbers: [${res.details.required.join(', ')}]. Found: [${res.details.found.join(', ')}]. Missing: [${res.details.missing.join(', ')}].`);
+      } else if (res.details.type === 'keyword' && res.details.required.length > 0) {
         msaLog_(`   > Required keywords: [${res.details.required.join(', ')}]. Found: [${res.details.found.join(', ')}]. Missing: [${res.details.missing.join(', ')}].`);
       }
     }
@@ -115,13 +110,49 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
  * @returns {{awarded: boolean, score: number}}
  */
 function srgMatchRequirement_(studentOcrText, requirementText) {
-  // 1. Extract all numbers (including decimals and negatives) from both texts.
   const getNumbers = (text) => (String(text || "").match(/-?\d+(\.\d+)?/g) || []);
-  const studentNumbers = new Set(getNumbers(studentOcrText));
-  const requirementNumbers = getNumbers(requirementText);
 
-  // 2. If the requirement contains numbers, prioritize matching them.
+  // --- STRATEGY 1: Exact Assignment Match (e.g., "n=27") ---
+  // This is high confidence and is checked against the whole document.
+  const normalizedRequirement = String(requirementText || "").replace(/[\\()]/g, "").trim();
+  const assignmentMatch = normalizedRequirement.match(/\b([a-z])\s*=\s*(-?\d+(\.\d+)?)\b/i);
+  if (assignmentMatch) {
+    const varName = assignmentMatch[1];
+    const reqValue = assignmentMatch[2];
+    const studentAssignmentRegex = new RegExp(`\\b${varName}\\s*=\\s*${reqValue}\\b`, "i");
+    const normalizedStudentText = String(studentOcrText || "").replace(/[\\()]/g, "");
+    if (studentAssignmentRegex.test(normalizedStudentText)) {
+      return { awarded: true, score: 1.0, details: { type: 'assignment', required: `${varName}=${reqValue}`, found: `${varName}=${reqValue}`, missing: [] } };
+    }
+  }
+
+  // --- STRATEGY 2: Contextual Number Match ---
+  // If the requirement has a part marker like (i), look for the number on the same line as that marker in the student's work.
+  const partMarkerMatch = String(requirementText || "").match(/^\s*(\(\s*[ivx]+\s*\))/);
+  const requirementNumbers = getNumbers(requirementText);
+  if (partMarkerMatch && requirementNumbers.length > 0) {
+    const partMarker = partMarkerMatch[1]; // e.g., "(i)"
+    const escapedPartMarker = partMarker.replace('(', '\\(').replace(')', '\\)');
+    const partMarkerRegex = new RegExp(escapedPartMarker);
+    const studentLines = (studentOcrText || "").split(/\r?\n/);
+
+    for (const line of studentLines) {
+      if (partMarkerRegex.test(line)) {
+        // This line in the student's work contains the part marker.
+        // Does it also contain ALL the required numbers?
+        const lineNumbers = new Set(getNumbers(line));
+        const allNumbersFound = requirementNumbers.every(num => lineNumbers.has(num));
+        if (allNumbersFound) {
+          return { awarded: true, score: 1.0, details: { type: 'contextual_numeric', required: requirementNumbers, found: requirementNumbers, missing: [] } };
+        }
+      }
+    }
+  }
+
+  // --- STRATEGY 3: Global Numeric Match (Fallback) ---
+  // This is the broad search, now used as a last resort for numeric checks.
   if (requirementNumbers.length > 0) {
+    const studentNumbers = new Set(getNumbers(studentOcrText));
     const foundNumbers = requirementNumbers.filter(num => studentNumbers.has(num));
     const numberMatchRatio = foundNumbers.length / requirementNumbers.length;
 
@@ -144,7 +175,8 @@ function srgMatchRequirement_(studentOcrText, requirementText) {
     };
   }
 
-  // 3. Fallback to keyword matching for non-numeric requirements (e.g., "evidence of substitution").
+  // --- STRATEGY 4: Keyword Match ---
+  // For non-numeric requirements (e.g., "evidence of substitution").
   const getWords = (text) => new Set(String(text || "").toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 3 && !/^\d+$/.test(w)));
   const studentWords = getWords(studentOcrText);
   const requirementWords = Array.from(getWords(requirementText));
@@ -165,7 +197,7 @@ function srgMatchRequirement_(studentOcrText, requirementText) {
     };
   }
 
-  // 4. If the requirement has no numbers and no keywords, we cannot grade it automatically.
+  // If the requirement has no numbers and no keywords, we cannot grade it automatically.
   return { awarded: false, score: 0, details: { type: 'none' } };
 }
 
