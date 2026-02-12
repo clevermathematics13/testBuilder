@@ -329,7 +329,7 @@ function _getOcrPages(docId) {
 /* --- Scoring & Utilities --- */
 
 function msaShouldTriggerPass2_(pointsJson, score, validation, cfg) {
-  const hasCompoundMarks = (pointsJson.points || []).some(p => msaSplitCompoundMark_(p.mark));
+  const hasCompoundMarks = (pointsJson.points || []).some(p => p.marks && p.marks.length > 1);
   const trigger = (hasCompoundMarks || score.coverage < cfg.MSA_PASS2_COVERAGE_TRIGGER);
   return { trigger: trigger, reason: hasCompoundMarks ? "compound_marks" : "threshold" };
 }
