@@ -86,7 +86,14 @@ function getPreviewDataByTitle(title) {
   }
   const previewHtml = previewFileIterator.next().getBlob().getDataAsString();
 
-  return { status: 'SUCCESS', sourceDocUrl: sourceDocUrl, previewHtml: previewHtml };
+  // Also fetch the new structured preview, if it exists.
+  const structuredPreviewFileIterator = folder.getFilesByName("markscheme_structured_preview.html");
+  let structuredPreviewHtml = null;
+  if (structuredPreviewFileIterator.hasNext()) {
+    structuredPreviewHtml = structuredPreviewFileIterator.next().getBlob().getDataAsString();
+  }
+
+  return { status: 'SUCCESS', sourceDocUrl: sourceDocUrl, previewHtml: previewHtml, structuredPreviewHtml: structuredPreviewHtml };
 }
 
 /**

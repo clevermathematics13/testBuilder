@@ -146,7 +146,7 @@ function msaDeleteFileIfExists_(folder, filename) {
   }
 }
 
-function msaWritePreviewArtifacts_(cfg, docId, folder, combined, pages) {
+function msaWritePreviewArtifacts_(cfg, docId, folder, pages) {
   if (typeof msaBuildPreviewHtml_ !== 'function') {
     msaLog_("msaBuildPreviewHtml_ not found (MSA_Preview.gs missing?). Skipping preview.");
     return;

@@ -94,7 +94,15 @@ function _runMsaPipeline(docId, ocrPages) {
   msaUpsertJsonFile_(folder, "markscheme_points_best.json", best.best.json);
   msaUpsertTextFile_(folder, "markscheme_points_best_readable.txt", best.best.readable);
 
-  msaWritePreviewArtifacts_(cfg, docId, folder, combined, ocrPages);
+  // Write the original preview based on raw OCR text
+  msaWritePreviewArtifacts_(cfg, docId, folder, ocrPages);
+
+  // Write the new structured preview that explicitly links work to marks
+  if (typeof msaBuildStructuredPreviewHtml_ === 'function') {
+    const meta = msaGetDocMeta_(cfg, docId);
+    const structuredHtml = msaBuildStructuredPreviewHtml_(meta.title, docId, best.best.json.points);
+    msaUpsertTextFile_(folder, "markscheme_structured_preview.html", structuredHtml);
+  }
 
   const extractedScoreInfo = msaCalculateTotalPossibleScore_(best.best.json.points);
   const officialTotal = officialTotalMarks;
