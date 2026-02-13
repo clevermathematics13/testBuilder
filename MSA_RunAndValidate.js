@@ -181,9 +181,13 @@ function _runMsaPipeline(docId, ocrPages) {
  */
 function runParserFromJson_(ocrJsonFileId) {
   const cfg = msaGetConfig_();
-  const ocrData = msaReadJsonFileIfExists_(DriveApp.getFileById(ocrJsonFileId).getParent(), `${ocrJsonFileId}.json`);
-  if (!ocrData) {
-    throw new Error(`Could not read or parse OCR JSON file with ID: ${ocrJsonFileId}`);
+  let ocrData = null;
+  try {
+    const file = DriveApp.getFileById(ocrJsonFileId);
+    const raw = file.getBlob().getDataAsString();
+    ocrData = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`Could not read or parse OCR JSON file with ID: ${ocrJsonFileId}. ${e.message}`);
   }
 
   const docId = ocrData.source.docId;
