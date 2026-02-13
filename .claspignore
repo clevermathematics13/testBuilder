@@ -1,0 +1,14 @@
+**/*
+!appsscript.json
+!Index.html
+!WebApp.js
+!MSA_RunAndValidate.js
+!MSA_Helpers_And_Pass1.js
+!MSA_Drive.js
+!MSA_Atomizer_Pass1.js
+!MSA_Atomizer_Pass2.js
+!MSA_Atomizer_Pass3.js
+!MSA_Config.js
+!MSA_Preview.js
+!SRG_Grader.js
+!MSA_Mathpix.js

@@ -6,6 +6,9 @@
 // Where all markscheme folders live in Drive:
 const MSA_PARENT_FOLDER_ID = "1GDGql-mIeH2YoD1OfnFa0UhxUdaXsY4D";
 
+// Folder where OCR JSON outputs are stored (use same parent folder by default).
+const MSA_OCR_JSON_OUTPUT_FOLDER_ID = MSA_PARENT_FOLDER_ID;
+
 // Rules spreadsheet (you already have this):
 const MSA_GRADING_RULES_SPREADSHEET_ID = "1lrgFrwEpHhT6Cenfsj8dQ5VeseNa_V8RLWyQabBt1n4";
 const MSA_GRADING_RULES_SHEET_NAME = "rules";
