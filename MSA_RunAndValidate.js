@@ -66,7 +66,7 @@ function runOcrAndSaveToJson_(docId) {
     pages: ocrPages.map(p => ({ page: p.page, text: p.text }))
   };
 
-  const outputFolder = DriveApp.getFolderById(cfg.MSA_OCR_JSON_OUTPUT_FOLDER_ID);
+  const outputFolder = msaGetOrCreateQuestionFolder_(cfg, docId);
   const filename = `${docId}.json`;
   return msaUpsertJsonFile_(outputFolder, filename, outputJson);
 }
@@ -216,8 +216,22 @@ function runParserFromJson_(ocrJsonFileId) {
   const best = msaPickBestOutput_(pass1, pass2, pass3, validation, cfg);
 
   msaUpsertJsonFile_(folder, "markscheme_points_best.json", best.best.json);
-  // ... (the rest of the artifact writing can remain here)
-  return { status: 'SUCCESS', doc_id: docId, points: best.best.json.points }; // Simplified return for now
+  // Write preview artifacts for the web app UI.
+  msaWritePreviewArtifacts_(cfg, docId, folder, ocrPages);
+  if (typeof msaBuildStructuredPreviewHtml_ === 'function') {
+    const meta = msaGetDocMeta_(cfg, docId);
+    const structuredHtml = msaBuildStructuredPreviewHtml_(meta.title, docId, best.best.json.points);
+    msaUpsertTextFile_(folder, "markscheme_structured_preview.html", structuredHtml);
+  }
+
+  const meta = msaGetDocMeta_(cfg, docId);
+  return {
+    status: 'SUCCESS',
+    doc_id: docId,
+    doc_title: meta.title,
+    best_pass: best.bestPass,
+    points: best.best.json.points
+  };
 }
 
 function runMSA_VR_One(docId) {

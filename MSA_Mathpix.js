@@ -3,10 +3,13 @@
  ****************/
 
 function msaGetMathpixCreds_() {
-  return {
-    appId: "clevermathematis_6a2d44_d66d17",
-    appKey: "aea5fa5891cceb5486b02ba3505eb0667652379a310b596f9940dce1a6bf87a9"
-  };
+  const props = PropertiesService.getScriptProperties();
+  const appId = props.getProperty("MATHPIX_APP_ID");
+  const appKey = props.getProperty("MATHPIX_APP_KEY");
+  if (!appId || !appKey) {
+    throw new Error("Mathpix credentials missing. Set Script Properties MATHPIX_APP_ID and MATHPIX_APP_KEY.");
+  }
+  return { appId, appKey };
 }
 
 function msaMathpixOCR_(imageBlob, requestOptions) {
