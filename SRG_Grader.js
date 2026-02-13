@@ -17,41 +17,43 @@ function runSingleGradeTest() {
   // The File ID of the student's handwritten work image you uploaded to Drive.
   const STUDENT_WORK_IMAGE_ID = "1ELLBxY_kZKZDQ7OmHa8cyaz1oMBF8FyC";
 
-  // The Doc ID of the *question* the student was answering.
-  // This must be a docId that has already been processed by the MSA batch.
-  const QUESTION_DOC_ID = "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88"; //mark scheme
+  // The Doc ID of the markscheme Google Doc.
+  const MARKSCHEME_DOC_ID = "1Q0j5sk0-2xQWPEAS4NIO6jBq02IJvnNFvjc4cJJQu88";
 
   // -----------------------------------------
 
-  if (STUDENT_WORK_IMAGE_ID === "YOUR_IMAGE_FILE_ID_HERE" || QUESTION_DOC_ID === "A_QUESTION_DOC_ID_FROM_YOUR_BATCH") {
+  if (STUDENT_WORK_IMAGE_ID === "YOUR_IMAGE_FILE_ID_HERE" || MARKSCHEME_DOC_ID === "A_QUESTION_DOC_ID_FROM_YOUR_BATCH") {
     SpreadsheetApp.getUi().alert("Please open SRG_Grader.js and set the test IDs in the runSingleGradeTest function.");
     return;
   }
 
-  gradeStudentResponse(STUDENT_WORK_IMAGE_ID, QUESTION_DOC_ID);
+  // --- New Decoupled Workflow ---
+  // 1. Ensure the markscheme OCR JSON exists.
+  const ocrJsonFile = runOcrAndSaveToJson_(MARKSCHEME_DOC_ID);
+
+  // 2. Parse the OCR JSON to get the structured points.
+  const parsedResult = runParserFromJson_(ocrJsonFile.getId());
+  const markschemePoints = parsedResult.points;
+
+  // 3. Grade the student's work against the structured points.
+  gradeStudentResponse(STUDENT_WORK_IMAGE_ID, MARKSCHEME_DOC_ID, markschemePoints);
 }
 
 
 /**
  * Main function to grade a single student response.
  * @param {string} studentWorkImageId The File ID of the student's work image.
- * @param {string} questionDocId The Doc ID of the question being answered.
+ * @param {string} markschemeDocId The Doc ID of the question being answered.
+ * @param {Array<Object>} markschemePoints The pre-parsed array of markscheme points.
  */
-function gradeStudentResponse(studentWorkImageId, questionDocId) {
+function gradeStudentResponse(studentWorkImageId, markschemeDocId, markschemePoints) {
   const t0 = Date.now();
   msaLog_("=== SRG (Student Response Grader) START ===");
   const cfg = msaGetConfig_();
 
-  // 1. Find the markscheme folder and load the parsed points
-  const questionFolder = msaFindQuestionFolderByDocId_(cfg, questionDocId);
-  if (!questionFolder) return;
-
-  const markscheme = msaReadJsonFileIfExists_(questionFolder, "markscheme_points_best.json");
-  if (!markscheme || !markscheme.points) {
-    msaErr_("SRG: Could not load or parse markscheme_points_best.json from folder: " + questionFolder.getName());
-    return;
-  }
-  msaLog_("SRG: Loaded " + markscheme.points.length + " markscheme points.");
+  // 1. Find the output folder (still useful for saving student OCR).
+  const questionFolder = msaGetOrCreateQuestionFolder_(cfg, markschemeDocId);
+  msaLog_("SRG: Loaded " + markschemePoints.length + " markscheme points.");
 
   // 2. OCR the student's work
   msaLog_("SRG: OCR'ing student work image: " + studentWorkImageId);
@@ -65,7 +67,7 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
 
   // 3. Grade each point against the student's work
   const results = [];
-  markscheme.points.forEach(point => {
+  markschemePoints.forEach(point => {
     const matchResult = srgMatchRequirement_(studentText, point.requirement);
     results.push({
       point_id: point.id,
@@ -80,7 +82,7 @@ function gradeStudentResponse(studentWorkImageId, questionDocId) {
   });
 
   // 4. Calculate scores, correctly handling alternative methods
-  const possibleScoreInfo = msaCalculateTotalPossibleScore_(markscheme.points);
+  const possibleScoreInfo = msaCalculateTotalPossibleScore_(markschemePoints);
   const awardedScoreInfo = srgCalculateAwardedScore_(results);
 
   // 5. Log the final report

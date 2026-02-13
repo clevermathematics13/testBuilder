@@ -1,5 +1,6 @@
 /************************
  * MSA_RunAndValidate.gs
+ * (Refactored to support decoupled OCR and Parsing stages)
  ************************/
 
 function runMSA_VR_Batch() {
@@ -33,10 +34,44 @@ function runMSA_VR_Batch() {
 }
 
 function runMSA_VR_One_ForWebApp(docId) {
-  const { ocrPages } = _getOcrPages(docId);
-  return _runMsaPipeline(docId, ocrPages);
+  // This is the main entry point for the web app.
+  // It now follows the decoupled OCR -> Parse workflow.
+  const ocrJsonFile = runOcrAndSaveToJson_(docId);
+  if (!ocrJsonFile) {
+    throw new Error("OCR stage failed to produce a JSON output file.");
+  }
+
+  const parsedResult = runParserFromJson_(ocrJsonFile.getId());
+  return parsedResult;
 }
 
+/**
+ * 🟢 STAGE 1: OCR
+ * Performs the hybrid OCR process and saves the output to a standardized JSON file
+ * in a central folder, as per your new architectural design.
+ * @param {string} docId The Google Doc ID of the markscheme.
+ * @returns {Drive.File} The newly created OCR JSON file.
+ */
+function runOcrAndSaveToJson_(docId) {
+  const cfg = msaGetConfig_();
+  const { ocrPages } = _getOcrPages(docId);
+  const meta = msaGetDocMeta_(cfg, docId);
+
+  const outputJson = {
+    source: {
+      docId: docId,
+      docName: meta.title
+    },
+    createdAt: new Date().toISOString(),
+    pages: ocrPages.map(p => ({ page: p.page, text: p.text }))
+  };
+
+  const outputFolder = DriveApp.getFolderById(cfg.MSA_OCR_JSON_OUTPUT_FOLDER_ID);
+  const filename = `${docId}.json`;
+  return msaUpsertJsonFile_(outputFolder, filename, outputJson);
+}
+
+/*
 function _runMsaPipeline(docId, ocrPages) {
   msaLog_(`_runMsaPipeline: Started for docId=${docId}. Received ${ocrPages.length} OCR pages.`);
   const cfg = msaGetConfig_();
@@ -135,6 +170,50 @@ function _runMsaPipeline(docId, ocrPages) {
       score_breakdown: extractedScoreInfo.breakdown
     };
   }
+}*/
+
+/**
+ * 🟢 STAGE 2: PARSER
+ * Takes the File ID of a standardized OCR JSON file, runs the atomizer passes,
+ * and returns the final structured markscheme points.
+ * @param {string} ocrJsonFileId The Drive File ID of the OCR output JSON.
+ * @returns {object} The final result object, similar to the old pipeline output.
+ */
+function runParserFromJson_(ocrJsonFileId) {
+  const cfg = msaGetConfig_();
+  const ocrData = msaReadJsonFileIfExists_(DriveApp.getFileById(ocrJsonFileId).getParent(), `${ocrJsonFileId}.json`);
+  if (!ocrData) {
+    throw new Error(`Could not read or parse OCR JSON file with ID: ${ocrJsonFileId}`);
+  }
+
+  const docId = ocrData.source.docId;
+  const ocrPages = ocrData.pages; // The parser works with this structure.
+  const folder = msaGetOrCreateQuestionFolder_(cfg, docId); // Still create a folder for parser artifacts.
+
+  // --- This logic is moved from the old _runMsaPipeline ---
+  const rules = msaLoadGradingRules_(cfg);
+  const validation = msaBuildValidationReport_(cfg, docId, folder, ocrPages);
+  const ocrByPage = {};
+  ocrPages.forEach(p => { ocrByPage[p.page] = (p.text || "").split(/\r?\n/); });
+
+  const rawPass1 = msaAtomizePass1_(ocrPages, rules.rules, null);
+  const pass1 = { json: rawPass1, readable: JSON.stringify(rawPass1.points, null, 2) };
+  const pass1Score = msaScorePointsOutput_(pass1.json, validation, cfg);
+  const pass2ShouldRun = msaShouldTriggerPass2_(pass1.json, pass1Score, validation, cfg);
+
+  let pass2 = null;
+  if (pass2ShouldRun.trigger) {
+    const rawPass2 = msaAtomizerPass2_(pass1.json, ocrByPage);
+    pass2 = { json: rawPass2, readable: JSON.stringify(rawPass2.points, null, 2) };
+  }
+  const candidate = pass2 ? pass2 : pass1;
+  const rawPass3 = msaAtomizerPass3_(candidate.json, ocrByPage);
+  const pass3 = { json: rawPass3, readable: JSON.stringify(rawPass3.points, null, 2) };
+  const best = msaPickBestOutput_(pass1, pass2, pass3, validation, cfg);
+
+  msaUpsertJsonFile_(folder, "markscheme_points_best.json", best.best.json);
+  // ... (the rest of the artifact writing can remain here)
+  return { status: 'SUCCESS', doc_id: docId, points: best.best.json.points }; // Simplified return for now
 }
 
 function runMSA_VR_One(docId) {
