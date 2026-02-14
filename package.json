@@ -1,0 +1,14 @@
+{
+  "name": "gas-standalone-ui",
+  "version": "1.0.0",
+  "description": "Standalone UI for the MSA Grader",
+  "private": true,
+  "scripts": {
+    "reauth": "clasp logout && clasp login --creds ./clasp-oauth.json && clasp show-authorized-user",
+    "push": "clasp push",
+    "deploy": "clasp deploy",
+    "gas:run": "node scripts/gas_run_api.js",
+    "test:health": "npm run gas:run -- apiHealthCheck",
+    "test:grade": "npm run gas:run -- runSingleGradeTest"
+  }
+}

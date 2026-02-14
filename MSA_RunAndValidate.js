@@ -3,6 +3,31 @@
  * (Refactored to support decoupled OCR and Parsing stages)
  ************************/
 
+function apiHealthCheck() {
+  return {
+    ok: true,
+    timestamp: new Date().toISOString()
+  };
+}
+
+function apiAuthStatus() {
+  const info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
+  return {
+    authorizationStatus: String(info.getAuthorizationStatus()),
+    authorizationUrl: info.getAuthorizationUrl() || null,
+    effectiveUser: Session.getEffectiveUser().getEmail() || null,
+    activeUser: Session.getActiveUser().getEmail() || null
+  };
+}
+
+function apiDriveScopeSmokeTest() {
+  const rootFolderId = DriveApp.getRootFolder().getId();
+  return {
+    ok: true,
+    rootFolderId
+  };
+}
+
 function runMSA_VR_Batch() {
   msaLog_("=== MSA-VR (Validation & Repair) BATCH START ===");
 
