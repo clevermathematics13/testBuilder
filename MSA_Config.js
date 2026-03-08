@@ -23,7 +23,7 @@ const MSA_OCR_CORRECTIONS_SPREADSHEET_ID = "";
 
 // ── Master killswitch for OCR correction systems ──
 // Set to false to bypass ALL learned + student corrections (pure Mathpix output).
-const MSA_OCR_CORRECTIONS_ENABLED = false;
+const MSA_OCR_CORRECTIONS_ENABLED = true;
 
 // Minimum frequency before a learned correction is auto-applied
 // 1 = apply after first correction, 2 = require two sightings, etc.

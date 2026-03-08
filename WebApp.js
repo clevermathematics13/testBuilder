@@ -347,7 +347,7 @@ function testStudentWorkOcr(fileId, options = {}) {
     // ─── PHASE 5: CLEAN ───
     tPhase = Date.now();
     msaLog_('───────────────────────────────────────────');
-    msaLog_('[5/7 CLEAN] 3-pass: crossedOff→globalRules→studentRules→notationNorm');
+    msaLog_('[5/7 CLEAN] crossedOff→notationRepair→scribbleDigit→predictive→globalRules→studentRules→notationNorm→opDigit');
     var textBefore = (ocrResult.text || '').length;
 
     // 5A: Crossed-off detection
@@ -375,18 +375,44 @@ function testStudentWorkOcr(fileId, options = {}) {
     }
     msaLog_('[5/7 CLEAN] 5A2 notationRepair: applied=' + notationRepairResult.applied.length + ' replacements=' + notationRepairResult.totalReplacements + ' Δ' + (Date.now() - t5a2) + 'ms');
 
+    // 5A3: Scribble digit artifact removal
+    var t5a3 = Date.now();
+    var scribbleResult = fixScribbleDigitArtifacts_(notationRepairResult.text, detectedQuestionCode);
+    if (scribbleResult.applied.length > 0) {
+      scribbleResult.applied.forEach(function(a) {
+        msaLog_('[5/7 CLEAN] 5A3 scribble: "' + a.from + '"→"' + a.to + '" (' + a.reason + ')');
+      });
+    }
+    msaLog_('[5/7 CLEAN] 5A3 scribbleDigit: applied=' + scribbleResult.applied.length + ' replacements=' + scribbleResult.totalReplacements + ' Δ' + (Date.now() - t5a3) + 'ms');
+
+    // 5A4: Context-predictive correction (uses mark scheme + question + progressive student work)
+    var t5a4 = Date.now();
+    var msPointsPredictive = null;
+    var questionContextPredictive = (fullOcrResult && fullOcrResult.text) ? fullOcrResult.text : '';
+    var lineDataPredictive = ocrResult.line_data || [];
+    if (detectedQuestionCode) {
+      try { msPointsPredictive = loadMarkschemePoints_(detectedQuestionCode); } catch (e) { /* best effort */ }
+    }
+    var predictiveResult = contextPredictiveCorrection_(scribbleResult.text, msPointsPredictive, questionContextPredictive, lineDataPredictive);
+    if (predictiveResult.applied.length > 0) {
+      predictiveResult.applied.forEach(function(a) {
+        msaLog_('[5/7 CLEAN] 5A4 predictive: "' + a.from + '"→"' + a.to + '" (' + a.reason + ')');
+      });
+    }
+    msaLog_('[5/7 CLEAN] 5A4 predictive: applied=' + predictiveResult.applied.length + ' replacements=' + predictiveResult.totalReplacements + ' vocab=' + predictiveResult.vocabularySize + ' Δ' + (Date.now() - t5a4) + 'ms');
+
     // 5B: Global learned corrections
     var t5b = Date.now();
     var correctionsEnabled = (options.enableCorrections !== undefined)
       ? options.enableCorrections
       : ((typeof MSA_OCR_CORRECTIONS_ENABLED !== 'undefined') ? MSA_OCR_CORRECTIONS_ENABLED : true);
-    var learnedResult = { text: notationRepairResult.text, applied: [], stats: { rulesLoaded: 0, rulesApplied: 0, totalReplacements: 0 } };
+    var learnedResult = { text: predictiveResult.text, applied: [], stats: { rulesLoaded: 0, rulesApplied: 0, totalReplacements: 0 } };
     if (!correctionsEnabled) {
       msaLog_('[5/7 CLEAN] 5B globalRules: BYPASSED (MSA_OCR_CORRECTIONS_ENABLED=false)');
     } else try {
       var minFreq = (typeof MSA_OCR_LEARN_MIN_FREQUENCY !== 'undefined') ? MSA_OCR_LEARN_MIN_FREQUENCY : 2;
       learnedResult = applyLearnedCorrections_(
-        notationRepairResult.text,
+        predictiveResult.text,
         { minFrequency: minFreq }
       );
       if (learnedResult.applied && learnedResult.applied.length > 0) {
@@ -397,7 +423,7 @@ function testStudentWorkOcr(fileId, options = {}) {
     } catch (learnErr) {
       msaWarn_('[5/7 CLEAN] 5B SKIP: ' + learnErr.message);
     }
-    msaLog_('[5/7 CLEAN] 5B globalRules: loaded=' + learnedResult.stats.rulesLoaded + ' applied=' + learnedResult.stats.rulesApplied + ' replacements=' + learnedResult.stats.totalReplacements + ' chars=' + notationRepairResult.text.length + '→' + learnedResult.text.length + ' Δ' + (Date.now() - t5b) + 'ms');
+    msaLog_('[5/7 CLEAN] 5B globalRules: loaded=' + learnedResult.stats.rulesLoaded + ' applied=' + learnedResult.stats.rulesApplied + ' replacements=' + learnedResult.stats.totalReplacements + ' chars=' + predictiveResult.text.length + '→' + learnedResult.text.length + ' Δ' + (Date.now() - t5b) + 'ms');
 
     // 5C: Per-student corrections
     var t5c = Date.now();
@@ -655,6 +681,15 @@ function testStudentWorkOcr(fileId, options = {}) {
       notationNormalization: {
         applied: notationResult.applied,
         totalReplacements: notationResult.totalReplacements
+      },
+      scribbleDigitCleanup: {
+        applied: scribbleResult.applied,
+        totalReplacements: scribbleResult.totalReplacements
+      },
+      predictiveCorrection: {
+        applied: predictiveResult.applied,
+        totalReplacements: predictiveResult.totalReplacements,
+        vocabularySize: predictiveResult.vocabularySize
       },
       operatorDigitFixes: {
         applied: opDigitResult.applied,
@@ -1201,6 +1236,284 @@ function fixOperatorDigitConfusion_(studentText, markschemePoints, questionText)
   });
 
   return { text: result, applied: applied, totalReplacements: totalReplacements };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 5A3: Scribble digit artifact removal
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Detects and removes scribble digit artifacts — trailing zeros or repeated
+ * digits that appear when a student scratches off work and Mathpix misreads
+ * the scribble marks as extra digits. Example: student wrote "6" then
+ * scratched it off → OCR yields "6000" or "6666".
+ *
+ * Uses mark-scheme context to validate: only collapses when the core digit
+ * (without trailing artifacts) matches a mark-scheme value.
+ *
+ * @param {string} text  The OCR text to clean
+ * @param {string} [questionCode]  Optional question code for mark scheme lookup
+ * @returns {object} { text, applied: [{from, to, reason, count}], totalReplacements }
+ */
+function fixScribbleDigitArtifacts_(text, questionCode) {
+  if (!text) return { text: text || '', applied: [], totalReplacements: 0 };
+
+  var msNumbers = {};
+  if (questionCode) {
+    try {
+      var msPoints = loadMarkschemePoints_(questionCode);
+      if (msPoints && msPoints.length > 0) {
+        msPoints.forEach(function(p) {
+          var nums = (p.requirement || '').match(/\d+(?:\.\d+)?/g) || [];
+          nums.forEach(function(n) { msNumbers[n] = true; });
+        });
+      }
+    } catch (e) { /* best effort */ }
+  }
+
+  var result = text;
+  var applied = [];
+  var totalReplacements = 0;
+
+  // Pattern A: Trailing zeros — e.g. "6000" → "6" (when "6" is in mark scheme)
+  // Matches a non-zero digit followed by 2+ zeros, not part of a larger number
+  var trailingZerosRe = /(?<!\d)([1-9])(0{2,})(?!\d)/g;
+  var match;
+  var replacements = [];
+  while ((match = trailingZerosRe.exec(result)) !== null) {
+    var fullMatch = match[0];
+    var coreDigit = match[1];
+    // Only collapse if the core digit is in the mark scheme and the full number is NOT
+    if (msNumbers[coreDigit] && !msNumbers[fullMatch]) {
+      replacements.push({ full: fullMatch, core: coreDigit, index: match.index });
+    }
+  }
+  // Apply in reverse order to preserve indices
+  for (var i = replacements.length - 1; i >= 0; i--) {
+    var r = replacements[i];
+    result = result.substring(0, r.index) + r.core + result.substring(r.index + r.full.length);
+    applied.push({
+      from: r.full,
+      to: r.core,
+      reason: 'Trailing zeros (scribble artifact): "' + r.full + '" collapsed to mark-scheme value "' + r.core + '"',
+      count: 1
+    });
+    totalReplacements++;
+  }
+
+  // Pattern B: Same-digit repetition — e.g. "6666" → "6" (when "6" is in mark scheme)
+  // Matches a digit repeated 3+ times, not part of a larger number
+  var repeatDigitRe = /(?<!\d)(\d)\1{2,}(?!\d)/g;
+  replacements = [];
+  while ((match = repeatDigitRe.exec(result)) !== null) {
+    var fullMatch2 = match[0];
+    var singleDigit = match[1];
+    if (msNumbers[singleDigit] && !msNumbers[fullMatch2]) {
+      replacements.push({ full: fullMatch2, core: singleDigit, index: match.index });
+    }
+  }
+  for (var j = replacements.length - 1; j >= 0; j--) {
+    var r2 = replacements[j];
+    result = result.substring(0, r2.index) + r2.core + result.substring(r2.index + r2.full.length);
+    applied.push({
+      from: r2.full,
+      to: r2.core,
+      reason: 'Repeated digit (scribble artifact): "' + r2.full + '" collapsed to mark-scheme value "' + r2.core + '"',
+      count: 1
+    });
+    totalReplacements++;
+  }
+
+  return { text: result, applied: applied, totalReplacements: totalReplacements };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 5A4: Context-predictive OCR correction
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Common OCR digit confusion pairs — when Mathpix misreads one digit as
+ * another. Used for single-digit substitution in predictive correction.
+ */
+var OCR_DIGIT_CONFUSION_PAIRS_ = [
+  ['1','7'], ['5','6'], ['3','8'], ['0','6'], ['0','9'], ['6','9'],
+  ['1','4'], ['2','7'], ['3','5'], ['4','9'], ['2','3'], ['8','0']
+];
+
+/**
+ * Uses question text, mark scheme, and progressive student work context to
+ * predict and fix OCR misinterpretations. Builds a "vocabulary" of expected
+ * numbers/values, then checks if any OCR'd number is a single-digit-swap
+ * away from a vocabulary entry.
+ *
+ * Strategies:
+ *   1. Vocabulary building: extract multi-digit numbers from mark scheme (priority)
+ *      and question text, plus progressive student work context
+ *   2. Single-digit substitution: for each multi-digit number NOT in vocab,
+ *      try swapping each digit using confusion pairs; correct only when
+ *      exactly 1 candidate matches a vocab entry
+ *   3. Expression-fragment matching: look for "variable = number" patterns
+ *      in mark scheme, check if student text has same variable with a
+ *      different (1-digit-swap-away) number
+ *
+ * @param {string} text  Student OCR text
+ * @param {Array|null} markschemePoints  Mark scheme points array (or null)
+ * @param {string} questionText  Printed question text from OCR
+ * @param {Array} lineData  Line-level OCR data for progressive context
+ * @returns {object} { text, applied, totalReplacements, vocabularySize }
+ */
+function contextPredictiveCorrection_(text, markschemePoints, questionText, lineData) {
+  if (!text) return { text: text || '', applied: [], totalReplacements: 0, vocabularySize: 0 };
+
+  // ── Strategy 1: Build vocabulary ──
+  var vocab = {};  // value → { source: 'ms'|'q'|'student', priority: number }
+
+  // 1a: Mark scheme numbers (highest priority)
+  if (markschemePoints && markschemePoints.length > 0) {
+    markschemePoints.forEach(function(p) {
+      var nums = (p.requirement || '').match(/\d+(?:\.\d+)?/g) || [];
+      nums.forEach(function(n) {
+        if (n.length >= 2) {
+          vocab[n] = { source: 'ms', priority: 3 };
+        }
+      });
+    });
+  }
+
+  // 1b: Question text numbers (medium priority)
+  if (questionText) {
+    var qNums = questionText.match(/\d+(?:\.\d+)?/g) || [];
+    qNums.forEach(function(n) {
+      if (n.length >= 2 && !vocab[n]) {
+        vocab[n] = { source: 'q', priority: 2 };
+      }
+    });
+  }
+
+  // 1c: Progressive student context — numbers already seen in earlier lines (low priority)
+  if (lineData && lineData.length > 1) {
+    for (var li = 0; li < lineData.length - 1; li++) {
+      var lineText = lineData[li].text || '';
+      var lineNums = lineText.match(/\d+(?:\.\d+)?/g) || [];
+      lineNums.forEach(function(n) {
+        if (n.length >= 2 && !vocab[n]) {
+          vocab[n] = { source: 'student', priority: 1 };
+        }
+      });
+    }
+  }
+
+  var vocabSize = Object.keys(vocab).length;
+  if (vocabSize === 0) {
+    return { text: text, applied: [], totalReplacements: 0, vocabularySize: 0 };
+  }
+
+  var result = text;
+  var applied = [];
+  var totalReplacements = 0;
+
+  // ── Strategy 2: Single-digit substitution ──
+  // Find all multi-digit numbers in student text
+  var studentNums = result.match(/\d+(?:\.\d+)?/g) || [];
+  var seen = {};
+  studentNums.forEach(function(num) {
+    if (num.length < 2 || seen[num] || vocab[num]) return;  // skip single digits and already-in-vocab
+    seen[num] = true;
+
+    // Try swapping each digit position using confusion pairs
+    var candidates = [];
+    var digits = num.split('');
+    for (var pos = 0; pos < digits.length; pos++) {
+      var origDigit = digits[pos];
+      OCR_DIGIT_CONFUSION_PAIRS_.forEach(function(pair) {
+        var swapDigit = null;
+        if (pair[0] === origDigit) swapDigit = pair[1];
+        else if (pair[1] === origDigit) swapDigit = pair[0];
+        if (!swapDigit) return;
+
+        var candidate = digits.slice();
+        candidate[pos] = swapDigit;
+        var candidateStr = candidate.join('');
+        if (vocab[candidateStr] && (vocab[candidateStr].source === 'ms' || vocab[candidateStr].source === 'q')) {
+          candidates.push({ value: candidateStr, source: vocab[candidateStr].source, pos: pos, from: origDigit, to: swapDigit });
+        }
+      });
+    }
+
+    // Only correct if exactly 1 unambiguous candidate match
+    if (candidates.length === 1) {
+      var c = candidates[0];
+      var re = new RegExp('(?<!\\d)' + escapeRegExp_(num) + '(?!\\d)', 'g');
+      var matches = result.match(re);
+      if (matches && matches.length > 0) {
+        result = result.replace(re, c.value);
+        applied.push({
+          from: num,
+          to: c.value,
+          reason: 'Digit swap [' + c.from + '\u2192' + c.to + '] pos ' + c.pos + ' (' + c.source + ' vocab match)',
+          count: matches.length
+        });
+        totalReplacements += matches.length;
+      }
+    }
+  });
+
+  // ── Strategy 3: Expression-fragment matching ──
+  // Look for "var = number" patterns in mark scheme
+  if (markschemePoints && markschemePoints.length > 0) {
+    var msExpressions = [];
+    markschemePoints.forEach(function(p) {
+      var req = p.requirement || '';
+      // Match patterns like "x = 5", "n = 12", "k=3.5"
+      var exprRe = /([a-zA-Z])\s*=\s*(-?\d+(?:\.\d+)?)/g;
+      var m;
+      while ((m = exprRe.exec(req)) !== null) {
+        msExpressions.push({ variable: m[1], value: m[2] });
+      }
+    });
+
+    msExpressions.forEach(function(expr) {
+      // Look for same variable with a different number in student text
+      var studentExprRe = new RegExp(escapeRegExp_(expr.variable) + '\\s*=\\s*(-?\\d+(?:\\.\\d+)?)', 'g');
+      var sm;
+      while ((sm = studentExprRe.exec(result)) !== null) {
+        var studentVal = sm[1];
+        if (studentVal === expr.value) continue;  // already correct
+        if (studentVal.length !== expr.value.length) continue;  // different magnitude — likely not a swap
+
+        // Check if single-digit swap away
+        var diffCount = 0;
+        for (var d = 0; d < studentVal.length; d++) {
+          if (studentVal[d] !== expr.value[d]) diffCount++;
+        }
+        if (diffCount === 1) {
+          // Verify the differing digits are in our confusion pairs
+          var diffPos = -1;
+          for (var dd = 0; dd < studentVal.length; dd++) {
+            if (studentVal[dd] !== expr.value[dd]) { diffPos = dd; break; }
+          }
+          var isPair = OCR_DIGIT_CONFUSION_PAIRS_.some(function(pair) {
+            return (pair[0] === studentVal[diffPos] && pair[1] === expr.value[diffPos]) ||
+                   (pair[1] === studentVal[diffPos] && pair[0] === expr.value[diffPos]);
+          });
+          if (isPair) {
+            var fullFrom = expr.variable + sm[0].substring(expr.variable.length, sm[0].length - studentVal.length) + studentVal;
+            var fullTo = expr.variable + sm[0].substring(expr.variable.length, sm[0].length - studentVal.length) + expr.value;
+            result = result.substring(0, sm.index) + fullTo + result.substring(sm.index + sm[0].length);
+            applied.push({
+              from: fullFrom,
+              to: fullTo,
+              reason: 'Expression match: ' + expr.variable + '=' + studentVal + ' \u2192 ' + expr.variable + '=' + expr.value + ' (ms)',
+              count: 1
+            });
+            totalReplacements++;
+          }
+        }
+      }
+    });
+  }
+
+  return { text: result, applied: applied, totalReplacements: totalReplacements, vocabularySize: vocabSize };
 }
 
 // ─────────────────────────────────────────────────────────────

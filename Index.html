@@ -969,6 +969,8 @@
                 <div class="ocr-meta-row"><strong>Markers Detected:</strong> <span id="ocr-markers-detected" style="font-weight: 500;">-</span></div>
                 <div class="ocr-meta-row"><strong>Crossed-Off Cleanup:</strong> <span id="ocr-crossed-off" style="font-weight: 500;">-</span></div>
                 <div class="ocr-meta-row"><strong>Notation Repair:</strong> <span id="ocr-notation-repair" style="font-weight: 500;">-</span></div>
+                <div class="ocr-meta-row"><strong>Scribble Cleanup:</strong> <span id="ocr-scribble-digits" style="font-weight: 500;">-</span></div>
+                <div class="ocr-meta-row"><strong>Predictive Context:</strong> <span id="ocr-predictive" style="font-weight: 500;">-</span></div>
                 <div class="correction-box learned" id="learned-correction-box">
                   <div class="correction-header"><strong>Learned Corrections:</strong> <span id="ocr-learned" style="font-weight: 500;">-</span></div>
                   <div class="correction-details" id="learned-correction-details"></div>
@@ -1965,6 +1967,33 @@
           } else {
             repairSpan.textContent = 'None needed';
             repairSpan.style.color = '#28a745';
+          }
+
+          // Display scribble digit cleanup status
+          const scribbleSpan = document.getElementById('ocr-scribble-digits');
+          if (result.scribbleDigitCleanup && result.scribbleDigitCleanup.totalReplacements > 0) {
+            scribbleSpan.textContent = '✂ ' + result.scribbleDigitCleanup.totalReplacements + ' scribble artifact(s) removed';
+            scribbleSpan.style.color = '#e67e22';
+            scribbleSpan.title = result.scribbleDigitCleanup.applied.map(function(a) {
+              return '"' + a.from + '" \u2192 "' + a.to + '"';
+            }).join('\n');
+          } else {
+            scribbleSpan.textContent = 'None detected';
+            scribbleSpan.style.color = '#28a745';
+          }
+
+          // Display predictive context correction status
+          const predSpan = document.getElementById('ocr-predictive');
+          if (result.predictiveCorrection && result.predictiveCorrection.totalReplacements > 0) {
+            predSpan.textContent = '\uD83D\uDD2E ' + result.predictiveCorrection.totalReplacements + ' context fix(es) (vocab: ' + result.predictiveCorrection.vocabularySize + ' values)';
+            predSpan.style.color = '#8e44ad';
+            predSpan.title = result.predictiveCorrection.applied.map(function(a) {
+              return '"' + a.from + '" \u2192 "' + a.to + '" (' + a.reason + ')';
+            }).join('\n');
+          } else {
+            var vocabInfo = (result.predictiveCorrection && result.predictiveCorrection.vocabularySize) ? ' (vocab: ' + result.predictiveCorrection.vocabularySize + ' values)' : '';
+            predSpan.textContent = 'No fixes needed' + vocabInfo;
+            predSpan.style.color = '#28a745';
           }
           
           // Display learned corrections status with animated expansion
