@@ -347,7 +347,7 @@ function testStudentWorkOcr(fileId, options = {}) {
     // ─── PHASE 5: CLEAN ───
     tPhase = Date.now();
     msaLog_('───────────────────────────────────────────');
-    msaLog_('[5/7 CLEAN] crossedOff→notationRepair→scribbleDigit→predictive→lowConfMS→globalRules→studentRules→notationNorm→opDigit');
+    msaLog_('[5/7 CLEAN] crossedOff→notationRepair→scribbleDigit→predictive→lowConfMS→fracRecover→globalRules→studentRules→notationNorm→opDigit');
     var textBefore = (ocrResult.text || '').length;
 
     // 5A: Crossed-off detection
@@ -412,12 +412,24 @@ function testStudentWorkOcr(fileId, options = {}) {
     }
     msaLog_('[5/7 CLEAN] 5A5 lowConfMS: applied=' + lowConfResult.applied.length + ' replacements=' + lowConfResult.totalReplacements + ' lowConfLines=' + lowConfResult.lowConfLineCount + ' threshold=' + lowConfResult.threshold + ' Δ' + (Date.now() - t5a5) + 'ms');
 
+    // 5A6: Fraction structure recovery (LaTeX reconciliation + MS-guided)
+    var t5a6 = Date.now();
+    var latexStyledForFrac = (fullOcrResult && fullOcrResult.latex_styled) ? fullOcrResult.latex_styled : '';
+    var msPointsFrac = msPointsLowConf;  // reuse from 5A4/5A5
+    var fracResult = recoverFractionStructure_(lowConfResult.text, latexStyledForFrac, msPointsFrac);
+    if (fracResult.applied.length > 0) {
+      fracResult.applied.forEach(function(a) {
+        msaLog_('[5/7 CLEAN] 5A6 fracRecover: "' + a.from + '"→"' + a.to + '" (' + a.source + ': ' + a.reason + ')');
+      });
+    }
+    msaLog_('[5/7 CLEAN] 5A6 fracRecover: applied=' + fracResult.applied.length + ' replacements=' + fracResult.totalReplacements + ' Δ' + (Date.now() - t5a6) + 'ms');
+
     // 5B: Global learned corrections
     var t5b = Date.now();
     var correctionsEnabled = (options.enableCorrections !== undefined)
       ? options.enableCorrections
       : ((typeof MSA_OCR_CORRECTIONS_ENABLED !== 'undefined') ? MSA_OCR_CORRECTIONS_ENABLED : true);
-    var learnedResult = { text: lowConfResult.text, applied: [], stats: { rulesLoaded: 0, rulesApplied: 0, totalReplacements: 0 } };
+    var learnedResult = { text: fracResult.text, applied: [], stats: { rulesLoaded: 0, rulesApplied: 0, totalReplacements: 0 } };
     if (!correctionsEnabled) {
       msaLog_('[5/7 CLEAN] 5B globalRules: BYPASSED (MSA_OCR_CORRECTIONS_ENABLED=false)');
     } else try {
@@ -434,7 +446,7 @@ function testStudentWorkOcr(fileId, options = {}) {
     } catch (learnErr) {
       msaWarn_('[5/7 CLEAN] 5B SKIP: ' + learnErr.message);
     }
-    msaLog_('[5/7 CLEAN] 5B globalRules: loaded=' + learnedResult.stats.rulesLoaded + ' applied=' + learnedResult.stats.rulesApplied + ' replacements=' + learnedResult.stats.totalReplacements + ' chars=' + lowConfResult.text.length + '→' + learnedResult.text.length + ' Δ' + (Date.now() - t5b) + 'ms');
+    msaLog_('[5/7 CLEAN] 5B globalRules: loaded=' + learnedResult.stats.rulesLoaded + ' applied=' + learnedResult.stats.rulesApplied + ' replacements=' + learnedResult.stats.totalReplacements + ' chars=' + fracResult.text.length + '→' + learnedResult.text.length + ' Δ' + (Date.now() - t5b) + 'ms');
 
     // 5C: Per-student corrections
     var t5c = Date.now();
@@ -707,6 +719,10 @@ function testStudentWorkOcr(fileId, options = {}) {
         totalReplacements: lowConfResult.totalReplacements,
         lowConfLineCount: lowConfResult.lowConfLineCount,
         threshold: lowConfResult.threshold
+      },
+      fractionRecovery: {
+        applied: fracResult.applied,
+        totalReplacements: fracResult.totalReplacements
       },
       operatorDigitFixes: {
         applied: opDigitResult.applied,
@@ -1638,6 +1654,149 @@ function lowConfidenceMarkSchemeCorrection_(text, msPoints, lineData) {
   });
 
   return { text: result, applied: applied, totalReplacements: totalReplacements, lowConfLineCount: lowConfLines.length, threshold: threshold };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 5A6: Fraction structure recovery
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Recover fractions lost by OCR.
+ *
+ * Two strategies:
+ *   A) LaTeX→text reconciliation — if latex_styled contains \frac{N}{D} that
+ *      the text output dropped or linearized, inject the LaTeX form.
+ *   B) Mark-scheme fraction recovery — if the mark scheme expects \frac{N}{D}
+ *      and OCR text shows only the denominator D in matching context, recover.
+ *
+ * Safety: only replaces when surrounding context (tokens after the denominator)
+ * match the mark scheme within a tolerance, preventing false positives.
+ *
+ * @param {string} text         Current pipeline text
+ * @param {string} latexStyled  Mathpix latex_styled output (may be empty)
+ * @param {Array}  msPoints     Mark scheme points (may be null)
+ * @returns {{ text:string, applied:Array, totalReplacements:number }}
+ */
+function recoverFractionStructure_(text, latexStyled, msPoints) {
+  var empty = { text: text || '', applied: [], totalReplacements: 0 };
+  if (!text) return empty;
+
+  var workingText = text;
+  var applied = [];
+  var totalReplacements = 0;
+  var alreadyRecovered = {}; // denominator → true, prevent double-fix
+
+  // Helper: extract all \frac{N}{D} from a string (handles simple nesting)
+  function extractFracs(src) {
+    var fracs = [];
+    var re = /\\frac\{([^{}]+)\}\{([^{}]+)\}/g;
+    var m;
+    while ((m = re.exec(src)) !== null) {
+      fracs.push({ full: m[0], num: m[1], den: m[2], idx: m.index });
+    }
+    return fracs;
+  }
+
+  // Helper: grab up to N chars after a position in a string (for context)
+  function afterCtx(s, pos, len) {
+    return (s.substring(pos, pos + (len || 12)) || '').replace(/\s+/g, '');
+  }
+
+  // ── Strategy A: LaTeX→text reconciliation ──
+  if (latexStyled) {
+    var latexFracs = extractFracs(latexStyled);
+    for (var i = 0; i < latexFracs.length; i++) {
+      var lf = latexFracs[i];
+      // Already present in text? Skip.
+      if (workingText.indexOf(lf.full) !== -1) continue;
+      // Linearized form present? (e.g. "13/2") Skip.
+      if (workingText.indexOf(lf.num + '/' + lf.den) !== -1) continue;
+      // Both must be simple numbers or short tokens for safe recovery
+      if (!/^[\d.]+$/.test(lf.den)) continue;
+
+      // What follows the fraction in latex_styled?
+      var latexAfter = afterCtx(latexStyled, lf.idx + lf.full.length, 8);
+
+      // Look for bare denominator in text followed by similar context
+      var denRe = new RegExp('(?<![\\d/\\\\])' + escapeRegExp_(lf.den) + '(?![\\d])', 'g');
+      var dm;
+      while ((dm = denRe.exec(workingText)) !== null) {
+        var textAfter = afterCtx(workingText, dm.index + dm[0].length, 8);
+        // Context must share at least first char (parenthesis, operator, etc.)
+        if (latexAfter.length > 0 && textAfter.length > 0 && latexAfter[0] === textAfter[0]) {
+          if (alreadyRecovered[lf.den + '@' + dm.index]) continue;
+          alreadyRecovered[lf.den + '@' + dm.index] = true;
+          workingText = workingText.substring(0, dm.index) + lf.full + workingText.substring(dm.index + dm[0].length);
+          applied.push({
+            from: lf.den,
+            to: lf.full,
+            reason: 'LaTeX has fraction, text had bare denominator (ctx match)',
+            source: 'latex_reconcile'
+          });
+          totalReplacements++;
+          break; // one replacement per latex fraction
+        }
+      }
+    }
+  }
+
+  // ── Strategy B: Mark-scheme fraction recovery ──
+  if (msPoints && msPoints.length > 0) {
+    // Collect unique fractions from all MS points
+    var msFracs = [];
+    var seenFrac = {};
+    msPoints.forEach(function(p) {
+      var fracs = extractFracs(p.requirement || '');
+      fracs.forEach(function(f) {
+        var key = f.num + '/' + f.den;
+        if (!seenFrac[key]) {
+          seenFrac[key] = true;
+          // Capture what follows the fraction in the MS requirement
+          var msAfter = afterCtx(p.requirement || '', f.idx + f.full.length, 12);
+          msFracs.push({ num: f.num, den: f.den, full: f.full, msAfter: msAfter, reqSnippet: (p.requirement || '').substring(0, 80) });
+        }
+      });
+    });
+
+    for (var j = 0; j < msFracs.length; j++) {
+      var mf = msFracs[j];
+      // Skip if full fraction or linear form already present
+      if (workingText.indexOf(mf.full) !== -1) continue;
+      if (workingText.indexOf(mf.num + '/' + mf.den) !== -1) continue;
+      // Denominator must be a simple number
+      if (!/^[\d.]+$/.test(mf.den)) continue;
+
+      // Search for bare denominator in OCR text
+      var msDenRe = new RegExp('(?<![\\d/\\\\])' + escapeRegExp_(mf.den) + '(?![\\d])', 'g');
+      var mdm;
+      while ((mdm = msDenRe.exec(workingText)) !== null) {
+        if (alreadyRecovered[mf.den + '@' + mdm.index]) continue;
+        var ocrAfterDen = afterCtx(workingText, mdm.index + mdm[0].length, 12);
+        // Context match: the tokens after the denominator in OCR text should
+        // overlap with what follows the fraction in the mark scheme.
+        // Require at least 2-char overlap to avoid false positives.
+        var overlap = 0;
+        for (var k = 0; k < Math.min(ocrAfterDen.length, mf.msAfter.length); k++) {
+          if (ocrAfterDen[k] === mf.msAfter[k]) overlap++;
+          else break;
+        }
+        if (overlap >= 2 || (overlap >= 1 && mf.msAfter.length <= 2)) {
+          alreadyRecovered[mf.den + '@' + mdm.index] = true;
+          workingText = workingText.substring(0, mdm.index) + mf.full + workingText.substring(mdm.index + mdm[0].length);
+          applied.push({
+            from: mf.den,
+            to: mf.full,
+            reason: 'MS expects fraction; OCR showed bare denominator (ctx overlap=' + overlap + ')',
+            source: 'ms_fraction_recovery'
+          });
+          totalReplacements++;
+          break; // one replacement per MS fraction
+        }
+      }
+    }
+  }
+
+  return { text: workingText, applied: applied, totalReplacements: totalReplacements };
 }
 
 // ─────────────────────────────────────────────────────────────

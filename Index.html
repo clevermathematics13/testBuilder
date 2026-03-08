@@ -972,6 +972,7 @@
                 <div class="ocr-meta-row"><strong>Scribble Cleanup:</strong> <span id="ocr-scribble-digits" style="font-weight: 500;">-</span></div>
                 <div class="ocr-meta-row"><strong>Predictive Context:</strong> <span id="ocr-predictive" style="font-weight: 500;">-</span></div>
                 <div class="ocr-meta-row"><strong>Low-Conf Benefit:</strong> <span id="ocr-lowconf" style="font-weight: 500;">-</span></div>
+                <div class="ocr-meta-row"><strong>Fraction Recovery:</strong> <span id="ocr-frac-recover" style="font-weight: 500;">-</span></div>
                 <div class="correction-box learned" id="learned-correction-box">
                   <div class="correction-header"><strong>Learned Corrections:</strong> <span id="ocr-learned" style="font-weight: 500;">-</span></div>
                   <div class="correction-details" id="learned-correction-details"></div>
@@ -2011,6 +2012,19 @@
           } else {
             lowConfSpan.textContent = 'All lines high confidence';
             lowConfSpan.style.color = '#28a745';
+          }
+
+          // Display fraction recovery status
+          const fracSpan = document.getElementById('ocr-frac-recover');
+          if (result.fractionRecovery && result.fractionRecovery.totalReplacements > 0) {
+            fracSpan.textContent = '\u00F7 ' + result.fractionRecovery.totalReplacements + ' fraction(s) recovered';
+            fracSpan.style.color = '#8e44ad';
+            fracSpan.title = result.fractionRecovery.applied.map(function(a) {
+              return '"' + a.from + '" \u2192 "' + a.to + '" (' + a.source + ')';
+            }).join('\n');
+          } else {
+            fracSpan.textContent = 'No missing fractions detected';
+            fracSpan.style.color = '#95a5a6';
           }
           
           // Display learned corrections status with animated expansion
