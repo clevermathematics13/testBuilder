@@ -612,8 +612,8 @@
         animation: corrPanelSlide 0.2s ease-out;
       }
       @keyframes corrPanelSlide {
-        from { opacity: 0; max-height: 0; }
-        to   { opacity: 1; max-height: 400px; }
+        from { opacity: 0; transform: translateY(-4px); }
+        to   { opacity: 1; transform: translateY(0); }
       }
       .correction-detail-panel .cdp-header {
         font-weight: 700;
@@ -2960,63 +2960,92 @@
        * Shows grader reasoning and asks teacher WHY they disagree.
        */
       function openCorrectionPanel(idx) {
-        if (!window.currentGradingResult || !window.currentGradingResult.results) return;
+        try {
+          if (!window.currentGradingResult || !window.currentGradingResult.results) {
+            console.error('openCorrectionPanel: no currentGradingResult');
+            return;
+          }
 
-        // Close any already-open panel
-        var existing = document.querySelector('.correction-panel-row[style*="table-row"]');
-        if (existing) {
-          existing.style.display = 'none';
-          existing.querySelector('td').innerHTML = '';
+          var panelRow = document.getElementById('cdp-row-' + idx);
+          if (!panelRow) {
+            console.error('openCorrectionPanel: cdp-row-' + idx + ' not found');
+            return;
+          }
+
+          // Toggle off if already open
+          if (panelRow.style.display === 'table-row') {
+            panelRow.style.display = 'none';
+            panelRow.querySelector('td').innerHTML = '';
+            return;
+          }
+
+          // Close any already-open correction panel
+          document.querySelectorAll('.correction-panel-row').forEach(function(r) {
+            if (r.style.display === 'table-row') {
+              r.style.display = 'none';
+              r.querySelector('td').innerHTML = '';
+            }
+          });
+          // Close any open reasoning panel too
+          document.querySelectorAll('.reasoning-panel-row').forEach(function(r) {
+            if (r.style.display === 'table-row') {
+              r.style.display = 'none';
+              r.querySelector('td').innerHTML = '';
+            }
+          });
+
+          var res = window.currentGradingResult.results[idx];
+
+          var willAward = !res.awarded;
+          var actionVerb = willAward ? 'Award' : 'Remove';
+          var actionEmoji = willAward ? '✅' : '❌';
+
+          // Build the panel content
+          var html = '<div class="correction-detail-panel">';
+          html += '<div class="cdp-header">' + actionEmoji + ' ' + actionVerb + ' mark ' + res.point_id + ' — ' + (res.marks || []).join('') + '</div>';
+
+          // Grader reasoning section
+          html += '<div class="cdp-reasoning">';
+          html += '<strong>🤖 Grader\'s reasoning:</strong><br>';
+          html += buildReasoningHtml_(res.details);
+          if (res.awardedByImplication) {
+            html += '<br><em>This mark was awarded by <strong>implication</strong> (correct subsequent answer implies this step).</em>';
+          }
+          if (res.excludedByMethod) {
+            html += '<br><em>This mark is from <strong>' + (res.branch || '').replace('METHOD', 'Method ') + '</strong>, which was not selected. Best: ' + (res.selectedMethod || '').replace('METHOD', 'Method ') + '.</em>';
+          }
+          html += '</div>';
+
+          // Reason dropdown
+          html += '<label>Why is the grader wrong?</label>';
+          html += '<select id="cdp-reason-' + idx + '">';
+          CORRECTION_REASONS.forEach(function(r) {
+            html += '<option value="' + r.value + '">' + r.label + '</option>';
+          });
+          html += '</select>';
+
+          // Notes field
+          html += '<label style="margin-top:8px;">Notes <span style="font-weight:normal;color:#999;">(optional — be specific, this trains the AI)</span></label>';
+          html += '<textarea id="cdp-notes-' + idx + '" placeholder="e.g. The 1003 is from part (b), not part (ai). The grader should not search globally."></textarea>';
+
+          // Action buttons
+          html += '<div class="cdp-actions">';
+          html += '<button class="cdp-confirm" onclick="confirmCorrection(' + idx + ')">' + actionEmoji + ' ' + actionVerb + ' Mark</button>';
+          html += '<button class="cdp-cancel" onclick="cancelCorrection(' + idx + ')">Cancel</button>';
+          html += '</div>';
+          html += '</div>';
+
+          panelRow.querySelector('td').innerHTML = html;
+          panelRow.style.display = 'table-row';
+
+          // Scroll into view after layout settles
+          setTimeout(function() {
+            panelRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }, 50);
+        } catch (err) {
+          console.error('openCorrectionPanel error:', err);
+          alert('Correction panel error: ' + err.message);
         }
-
-        var res = window.currentGradingResult.results[idx];
-        var panelRow = document.getElementById('cdp-row-' + idx);
-        if (!panelRow) return;
-
-        var willAward = !res.awarded;
-        var actionVerb = willAward ? 'Award' : 'Remove';
-        var actionEmoji = willAward ? '✅' : '❌';
-
-        // Build the panel content
-        var html = '<div class="correction-detail-panel">';
-        html += '<div class="cdp-header">' + actionEmoji + ' ' + actionVerb + ' mark ' + res.point_id + ' — ' + (res.marks || []).join('') + '</div>';
-
-        // Grader reasoning section
-        html += '<div class="cdp-reasoning">';
-        html += '<strong>🤖 Grader\'s reasoning:</strong><br>';
-        html += buildReasoningHtml_(res.details);
-        if (res.awardedByImplication) {
-          html += '<br><em>This mark was awarded by <strong>implication</strong> (correct subsequent answer implies this step).</em>';
-        }
-        if (res.excludedByMethod) {
-          html += '<br><em>This mark is from <strong>' + (res.branch || '').replace('METHOD', 'Method ') + '</strong>, which was not selected. Best: ' + (res.selectedMethod || '').replace('METHOD', 'Method ') + '.</em>';
-        }
-        html += '</div>';
-
-        // Reason dropdown
-        html += '<label>Why is the grader wrong?</label>';
-        html += '<select id="cdp-reason-' + idx + '">';
-        CORRECTION_REASONS.forEach(function(r) {
-          html += '<option value="' + r.value + '">' + r.label + '</option>';
-        });
-        html += '</select>';
-
-        // Notes field
-        html += '<label style="margin-top:8px;">Notes <span style="font-weight:normal;color:#999;">(optional — be specific, this trains the AI)</span></label>';
-        html += '<textarea id="cdp-notes-' + idx + '" placeholder="e.g. The 1003 is from part (b), not part (ai). The grader should not search globally."></textarea>';
-
-        // Action buttons
-        html += '<div class="cdp-actions">';
-        html += '<button class="cdp-confirm" onclick="confirmCorrection(' + idx + ')">' + actionEmoji + ' ' + actionVerb + ' Mark</button>';
-        html += '<button class="cdp-cancel" onclick="cancelCorrection(' + idx + ')">Cancel</button>';
-        html += '</div>';
-        html += '</div>';
-
-        panelRow.querySelector('td').innerHTML = html;
-        panelRow.style.display = 'table-row';
-
-        // Scroll into view
-        panelRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
 
       /**
