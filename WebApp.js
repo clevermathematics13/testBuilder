@@ -347,7 +347,7 @@ function testStudentWorkOcr(fileId, options = {}) {
     // ─── PHASE 5: CLEAN ───
     tPhase = Date.now();
     msaLog_('───────────────────────────────────────────');
-    msaLog_('[5/7 CLEAN] crossedOff→notationRepair→scribbleDigit→predictive→globalRules→studentRules→notationNorm→opDigit');
+    msaLog_('[5/7 CLEAN] crossedOff→notationRepair→scribbleDigit→predictive→lowConfMS→globalRules→studentRules→notationNorm→opDigit');
     var textBefore = (ocrResult.text || '').length;
 
     // 5A: Crossed-off detection
@@ -401,18 +401,29 @@ function testStudentWorkOcr(fileId, options = {}) {
     }
     msaLog_('[5/7 CLEAN] 5A4 predictive: applied=' + predictiveResult.applied.length + ' replacements=' + predictiveResult.totalReplacements + ' vocab=' + predictiveResult.vocabularySize + ' Δ' + (Date.now() - t5a4) + 'ms');
 
+    // 5A5: Low-confidence mark scheme benefit-of-the-doubt correction
+    var t5a5 = Date.now();
+    var msPointsLowConf = msPointsPredictive;  // reuse from 5A4
+    var lowConfResult = lowConfidenceMarkSchemeCorrection_(predictiveResult.text, msPointsLowConf, lineDataPredictive);
+    if (lowConfResult.applied.length > 0) {
+      lowConfResult.applied.forEach(function(a) {
+        msaLog_('[5/7 CLEAN] 5A5 lowConf: "' + a.from + '"→"' + a.to + '" (conf=' + a.lineConf.toFixed(3) + ' ' + a.reason + ')');
+      });
+    }
+    msaLog_('[5/7 CLEAN] 5A5 lowConfMS: applied=' + lowConfResult.applied.length + ' replacements=' + lowConfResult.totalReplacements + ' lowConfLines=' + lowConfResult.lowConfLineCount + ' threshold=' + lowConfResult.threshold + ' Δ' + (Date.now() - t5a5) + 'ms');
+
     // 5B: Global learned corrections
     var t5b = Date.now();
     var correctionsEnabled = (options.enableCorrections !== undefined)
       ? options.enableCorrections
       : ((typeof MSA_OCR_CORRECTIONS_ENABLED !== 'undefined') ? MSA_OCR_CORRECTIONS_ENABLED : true);
-    var learnedResult = { text: predictiveResult.text, applied: [], stats: { rulesLoaded: 0, rulesApplied: 0, totalReplacements: 0 } };
+    var learnedResult = { text: lowConfResult.text, applied: [], stats: { rulesLoaded: 0, rulesApplied: 0, totalReplacements: 0 } };
     if (!correctionsEnabled) {
       msaLog_('[5/7 CLEAN] 5B globalRules: BYPASSED (MSA_OCR_CORRECTIONS_ENABLED=false)');
     } else try {
       var minFreq = (typeof MSA_OCR_LEARN_MIN_FREQUENCY !== 'undefined') ? MSA_OCR_LEARN_MIN_FREQUENCY : 2;
       learnedResult = applyLearnedCorrections_(
-        predictiveResult.text,
+        lowConfResult.text,
         { minFrequency: minFreq }
       );
       if (learnedResult.applied && learnedResult.applied.length > 0) {
@@ -423,7 +434,7 @@ function testStudentWorkOcr(fileId, options = {}) {
     } catch (learnErr) {
       msaWarn_('[5/7 CLEAN] 5B SKIP: ' + learnErr.message);
     }
-    msaLog_('[5/7 CLEAN] 5B globalRules: loaded=' + learnedResult.stats.rulesLoaded + ' applied=' + learnedResult.stats.rulesApplied + ' replacements=' + learnedResult.stats.totalReplacements + ' chars=' + predictiveResult.text.length + '→' + learnedResult.text.length + ' Δ' + (Date.now() - t5b) + 'ms');
+    msaLog_('[5/7 CLEAN] 5B globalRules: loaded=' + learnedResult.stats.rulesLoaded + ' applied=' + learnedResult.stats.rulesApplied + ' replacements=' + learnedResult.stats.totalReplacements + ' chars=' + lowConfResult.text.length + '→' + learnedResult.text.length + ' Δ' + (Date.now() - t5b) + 'ms');
 
     // 5C: Per-student corrections
     var t5c = Date.now();
@@ -690,6 +701,12 @@ function testStudentWorkOcr(fileId, options = {}) {
         applied: predictiveResult.applied,
         totalReplacements: predictiveResult.totalReplacements,
         vocabularySize: predictiveResult.vocabularySize
+      },
+      lowConfidenceCorrection: {
+        applied: lowConfResult.applied,
+        totalReplacements: lowConfResult.totalReplacements,
+        lowConfLineCount: lowConfResult.lowConfLineCount,
+        threshold: lowConfResult.threshold
       },
       operatorDigitFixes: {
         applied: opDigitResult.applied,
@@ -1514,6 +1531,113 @@ function contextPredictiveCorrection_(text, markschemePoints, questionText, line
   }
 
   return { text: result, applied: applied, totalReplacements: totalReplacements, vocabularySize: vocabSize };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 5A5: Low-confidence + mark scheme benefit-of-the-doubt
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * When a Mathpix line has LOW confidence, check whether numbers in that
+ * line are a single-digit-swap away from a mark scheme value.  If so,
+ * substitute — giving the student the benefit of the doubt over the OCR.
+ *
+ * Unlike 5A4 (which requires exactly 1 unambiguous candidate), this phase
+ * is MORE permissive: it fires even when multiple swap candidates exist,
+ * as long as *all* candidates point to the SAME mark scheme value.
+ * Justification: the line-level confidence is already below threshold,
+ * so the OCR is admitting it isn't sure.
+ *
+ * Key safeguard: only fires when per-line confidence exists AND is below
+ * MSA_LOW_CONF_THRESHOLD.  Lines without confidence data are skipped.
+ *
+ * @param {string} text           Student OCR text (post-5A4)
+ * @param {Array|null} msPoints   Mark scheme points from Drive JSON
+ * @param {Array}  lineData       Mathpix line_data with per-line confidence
+ * @returns {object} { text, applied[], totalReplacements, lowConfLineCount, threshold }
+ */
+function lowConfidenceMarkSchemeCorrection_(text, msPoints, lineData) {
+  var threshold = (typeof MSA_LOW_CONF_THRESHOLD !== 'undefined') ? MSA_LOW_CONF_THRESHOLD : 0.90;
+  var empty = { text: text || '', applied: [], totalReplacements: 0, lowConfLineCount: 0, threshold: threshold };
+  if (!text || !msPoints || msPoints.length === 0 || !lineData || lineData.length === 0) return empty;
+
+  // Build mark scheme number set
+  var msNums = {};
+  msPoints.forEach(function(p) {
+    var matches = (p.requirement || '').match(/\d+(?:\.\d+)?/g) || [];
+    matches.forEach(function(n) { if (n.length >= 2) msNums[n] = true; });
+  });
+  if (Object.keys(msNums).length === 0) return empty;
+
+  // Identify low-confidence lines
+  var lowConfLines = [];
+  lineData.forEach(function(line, idx) {
+    // Mathpix may use 'confidence', 'confidence_rate', or 'conf'
+    var conf = line.confidence !== undefined ? line.confidence
+             : line.confidence_rate !== undefined ? line.confidence_rate
+             : line.conf !== undefined ? line.conf
+             : null;
+    if (conf !== null && conf < threshold) {
+      lowConfLines.push({ text: line.text || '', confidence: conf, index: idx });
+    }
+  });
+
+  if (lowConfLines.length === 0) return empty;
+
+  var result = text;
+  var applied = [];
+  var totalReplacements = 0;
+  var alreadyCorrected = {};  // prevent double-corrections
+
+  lowConfLines.forEach(function(lowLine) {
+    // Find all multi-digit numbers in this low-confidence line
+    var lineNums = (lowLine.text).match(/\d+(?:\.\d+)?/g) || [];
+    lineNums.forEach(function(num) {
+      if (num.length < 2 || msNums[num] || alreadyCorrected[num]) return;
+
+      // Try every single-digit swap via confusion pairs
+      var candidates = {};  // candidateStr → count of ways to reach it
+      var digits = num.split('');
+      for (var pos = 0; pos < digits.length; pos++) {
+        var origDigit = digits[pos];
+        OCR_DIGIT_CONFUSION_PAIRS_.forEach(function(pair) {
+          var swapDigit = null;
+          if (pair[0] === origDigit) swapDigit = pair[1];
+          else if (pair[1] === origDigit) swapDigit = pair[0];
+          if (!swapDigit) return;
+
+          var trial = digits.slice();
+          trial[pos] = swapDigit;
+          var trialStr = trial.join('');
+          if (msNums[trialStr]) {
+            candidates[trialStr] = (candidates[trialStr] || 0) + 1;
+          }
+        });
+      }
+
+      var uniqueCandidates = Object.keys(candidates);
+      // Fire if ALL swap paths converge on a single MS value
+      if (uniqueCandidates.length === 1) {
+        var msVal = uniqueCandidates[0];
+        var re = new RegExp('(?<!\\d)' + escapeRegExp_(num) + '(?!\\d)', 'g');
+        var matches = result.match(re);
+        if (matches && matches.length > 0) {
+          result = result.replace(re, msVal);
+          applied.push({
+            from: num,
+            to: msVal,
+            reason: 'Low-conf line L' + lowLine.index + ' \u2192 MS match (benefit of doubt)',
+            lineConf: lowLine.confidence,
+            count: matches.length
+          });
+          totalReplacements += matches.length;
+          alreadyCorrected[num] = true;
+        }
+      }
+    });
+  });
+
+  return { text: result, applied: applied, totalReplacements: totalReplacements, lowConfLineCount: lowConfLines.length, threshold: threshold };
 }
 
 // ─────────────────────────────────────────────────────────────

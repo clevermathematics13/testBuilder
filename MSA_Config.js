@@ -39,6 +39,12 @@ const MSA_STUDENT_OCR_MIN_FREQUENCY = 1;
 
 // Maximum Levenshtein distance for fuzzy matching (0 = exact only, 1-2 = forgiving)
 const MSA_STUDENT_OCR_FUZZY_DISTANCE = 0;
+
+// ── Low-confidence OCR → mark scheme benefit-of-the-doubt threshold ──
+// When a Mathpix line's confidence is below this value (0–1), allow
+// digit-swap corrections that produce a mark scheme match.
+// 0.0 = never fire, 1.0 = always fire.  Recommended: 0.85–0.95
+const MSA_LOW_CONF_THRESHOLD = 0.90;
 // If a part’s command term is one of these, mark points with skip_autograde=true
 const MSA_SKIP_AUTOGRADE_COMMAND_TERMS = ["graph", "draw"];
 

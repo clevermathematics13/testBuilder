@@ -832,7 +832,7 @@
       <p style="margin: 5px 0; color: #666; font-size: 13px;">Test OCR on a single student work image (single-question test case)</p>
       <button id="test-student-ocr-btn">Test Student Work OCR</button>
       <div style="margin-top: 8px; display: flex; gap: 16px; font-size: 13px; color: #555;">
-        <label style="cursor: pointer;"><input type="checkbox" id="ocr-opt-corrections"> 5B/5C Corrections</label>
+        <label style="cursor: pointer;"><input type="checkbox" id="ocr-opt-corrections" checked> 5B/5C Corrections</label>
         <label style="cursor: pointer;"><input type="checkbox" id="ocr-opt-opdigit" checked> 5E Op-digit fix</label>
         <button id="manage-rules-btn" style="padding: 2px 10px; font-size: 12px; background: #667eea; color: white; border: none; border-radius: 3px; cursor: pointer;">📋 Manage Rules</button>
       </div>
@@ -971,6 +971,7 @@
                 <div class="ocr-meta-row"><strong>Notation Repair:</strong> <span id="ocr-notation-repair" style="font-weight: 500;">-</span></div>
                 <div class="ocr-meta-row"><strong>Scribble Cleanup:</strong> <span id="ocr-scribble-digits" style="font-weight: 500;">-</span></div>
                 <div class="ocr-meta-row"><strong>Predictive Context:</strong> <span id="ocr-predictive" style="font-weight: 500;">-</span></div>
+                <div class="ocr-meta-row"><strong>Low-Conf Benefit:</strong> <span id="ocr-lowconf" style="font-weight: 500;">-</span></div>
                 <div class="correction-box learned" id="learned-correction-box">
                   <div class="correction-header"><strong>Learned Corrections:</strong> <span id="ocr-learned" style="font-weight: 500;">-</span></div>
                   <div class="correction-details" id="learned-correction-details"></div>
@@ -1994,6 +1995,22 @@
             var vocabInfo = (result.predictiveCorrection && result.predictiveCorrection.vocabularySize) ? ' (vocab: ' + result.predictiveCorrection.vocabularySize + ' values)' : '';
             predSpan.textContent = 'No fixes needed' + vocabInfo;
             predSpan.style.color = '#28a745';
+          }
+
+          // Display low-confidence benefit-of-the-doubt status
+          const lowConfSpan = document.getElementById('ocr-lowconf');
+          if (result.lowConfidenceCorrection && result.lowConfidenceCorrection.totalReplacements > 0) {
+            lowConfSpan.textContent = '\u2696\uFE0F ' + result.lowConfidenceCorrection.totalReplacements + ' low-conf fix(es) (' + result.lowConfidenceCorrection.lowConfLineCount + ' weak lines, thr=' + (result.lowConfidenceCorrection.threshold * 100).toFixed(0) + '%)';
+            lowConfSpan.style.color = '#d35400';
+            lowConfSpan.title = result.lowConfidenceCorrection.applied.map(function(a) {
+              return '"' + a.from + '" \u2192 "' + a.to + '" (line conf=' + (a.lineConf * 100).toFixed(1) + '%)';
+            }).join('\n');
+          } else if (result.lowConfidenceCorrection && result.lowConfidenceCorrection.lowConfLineCount > 0) {
+            lowConfSpan.textContent = 'No swap matches (' + result.lowConfidenceCorrection.lowConfLineCount + ' weak lines)';
+            lowConfSpan.style.color = '#95a5a6';
+          } else {
+            lowConfSpan.textContent = 'All lines high confidence';
+            lowConfSpan.style.color = '#28a745';
           }
           
           // Display learned corrections status with animated expansion
