@@ -2,9 +2,25 @@
 <html>
   <head>
     <base target="_top">
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script>
+      window.MathJax = {
+        tex: {
+          displayMath: [['$$', '$$'], ['\\[', '\\]']],
+          inlineMath: [['$', '$'], ['\\(', '\\)']]
+        },
+        chtml: {
+          displayAlign: 'left'
+        }
+      };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
       body { font-family: sans-serif; margin: 20px; background-color: #f4f4f9; }
       h1, h3 { color: #333; }
+      h1 { position: relative; }
+      .nav-link { float: right; background-color: #667eea; color: white; padding: 8px 16px; border-radius: 5px; text-decoration: none; font-size: 14px; margin-top: 5px; transition: background-color 0.3s; }
+      .nav-link:hover { background-color: #5568d3; }
       #controls, #status-container, #modal { padding: 15px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 15px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
       #status { min-height: 100px; background-color: #272822; color: #f8f8f2; padding: 10px; border-radius: 5px; overflow-y: auto; max-height: 300px; font-family: monospace; }
       .log-entry { padding: 3px 5px; border-bottom: 1px solid #444; }
@@ -13,7 +29,8 @@
       .log-warn { color: #e6db74; }
       .modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 100; }
       #modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80%; max-width: 700px; z-index: 101; }
-      #compare-modal { padding: 15px; border: 1px solid #ccc; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 95%; max-width: 1600px; z-index: 101; }
+      #compare-modal { padding: 15px; border: 1px solid #ccc; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); position: fixed; top: 5%; bottom: 5%; left: 2.5%; right: 2.5%; width: auto; max-width: none; transform: none; z-index: 101; display: flex; flex-direction: column; }
+      #compare-modal > div:first-of-type { flex: 1; overflow: hidden; }
       #ocr-textarea { width: 98%; height: 300px; margin-top: 10px; font-family: monospace; }
       button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 5px; font-size: 14px; }
       #run-batch-btn { background-color: #4CAF50; color: white; }
@@ -22,19 +39,856 @@
       #run-batch-btn:disabled { background-color: #aaa; }
       #submit-correction-btn { background-color: #008CBA; color: white; }
       #skip-btn { background-color: #f44336; color: white; margin-left: 10px; }
+      
+      /* Student OCR Modal Styles */
+      #student-ocr-modal { padding: 15px; border: 1px solid #ccc; border-radius: 8px; background-color: #fff; box-shadow: 0 4px 8px rgba(0,0,0,0.2); position: fixed; top: 5%; bottom: 5%; left: 5%; right: 5%; width: auto; max-width: none; transform: none; z-index: 101; display: flex; flex-direction: column; }
+      .modal-resize-handle { height: 6px; cursor: ns-resize; background: transparent; flex-shrink: 0; position: relative; margin: -3px -15px 0; }
+      .modal-resize-handle::after { content: ''; display: block; width: 40px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto; position: relative; top: 1px; }
+      .modal-resize-handle:hover::after, .modal-resize-handle.active::after { background: #667eea; }
+      .student-ocr-content { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+      .student-ocr-sections { display: flex; flex: 1; min-height: 0; }
+      .student-ocr-section { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+      .split-resizer { width: 5px; cursor: col-resize; background: #dee2e6; border-radius: 2px; margin: 0 2px; flex-shrink: 0; transition: background 0.15s; }
+      .split-resizer:hover, .split-resizer.active { background: #667eea; }
+      .student-ocr-section h4 { margin-top: 0; }
+      .image-preview-container { flex: 1; overflow: auto; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9; display: flex; align-items: center; justify-content: center; min-height: 200px; position: relative; }
+      .image-preview-container img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform 0.2s ease; transform-origin: top left; }
+      .image-preview-container.zoomed { align-items: flex-start; justify-content: flex-start; cursor: grab; }
+      .image-preview-container.zoomed:active { cursor: grabbing; }
+      .image-preview-container.zoomed img { max-width: none; max-height: none; object-fit: unset; }
+      .zoom-toolbar { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; }
+      .zoom-toolbar button { padding: 4px 10px; font-size: 16px; background: #e9ecef; border: 1px solid #ced4da; border-radius: 4px; cursor: pointer; line-height: 1; min-width: 32px; }
+      .zoom-toolbar button:hover { background: #dee2e6; }
+      .zoom-toolbar .zoom-level { font-size: 12px; color: #666; min-width: 42px; text-align: center; }
+      #student-ocr-textarea { width: 100%; flex: 1; font-family: 'Courier New', monospace; font-size: 13px; resize: none; }
+      .ocr-meta { font-size: 12px; color: #666; margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px; }
+      .ocr-meta-row { margin-bottom: 3px; }
+
+      /* Expandable correction containers */
+      .correction-box {
+        margin: 4px 0;
+        border-radius: 5px;
+        overflow: hidden;
+        transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      }
+      .correction-box .correction-header {
+        padding: 3px 6px;
+        border-radius: 5px;
+        cursor: default;
+        font-weight: 500;
+        transition: background-color 0.3s;
+      }
+      .correction-box.learned .correction-header { background: rgba(111, 66, 193, 0.08); }
+      .correction-box.student .correction-header { background: rgba(231, 76, 60, 0.08); }
+      .correction-box.suggestions .correction-header { background: rgba(255, 193, 7, 0.12); }
+      .correction-box.suggestions .suggestion-list {
+        max-height: 0;
+        opacity: 0;
+        overflow: hidden;
+        transition: max-height 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                    opacity 0.4s ease,
+                    padding 0.4s ease;
+        padding: 0 8px;
+      }
+      .correction-box.suggestions.expanded .suggestion-list {
+        max-height: 600px;
+        opacity: 1;
+        padding: 6px 8px 8px;
+      }
+      .suggestion-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 0;
+        font-size: 12px;
+        border-bottom: 1px solid #f0f0f0;
+        opacity: 0;
+        transform: translateX(-8px);
+        animation: ruleSlideIn 0.35s ease forwards;
+      }
+      .suggestion-item:last-child { border-bottom: none; }
+      .suggestion-item .sugg-ocr { color: #c0392b; font-family: 'Courier New', monospace; font-weight: 600; }
+      .suggestion-item .sugg-arrow { color: #999; }
+      .suggestion-item .sugg-fix { color: #27ae60; font-family: 'Courier New', monospace; font-weight: 600; }
+      .suggestion-item .sugg-reason { color: #6c757d; font-size: 11px; flex: 1; }
+      .suggestion-item .sugg-apply-btn {
+        background: #ffc107; color: #333; border: none; border-radius: 3px;
+        padding: 2px 8px; font-size: 11px; font-weight: 600; cursor: pointer;
+        white-space: nowrap; transition: background 0.2s;
+      }
+      .suggestion-item .sugg-apply-btn:hover { background: #e0a800; }
+      .suggestion-item.applied { opacity: 0.5; text-decoration: line-through; }
+      .suggestion-item.applied .sugg-apply-btn { background: #28a745; color: white; cursor: default; }
+      .correction-box .correction-details {
+        max-height: 0;
+        opacity: 0;
+        overflow: hidden;
+        transition: max-height 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                    opacity 0.4s ease,
+                    padding 0.4s ease;
+        padding: 0 8px;
+      }
+      .correction-box.expanded .correction-details {
+        max-height: 500px;
+        opacity: 1;
+        padding: 4px 8px 6px;
+      }
+      .correction-rule {
+        display: block;
+        padding: 2px 0;
+        font-family: 'Courier New', monospace;
+        font-size: 11px;
+        opacity: 0;
+        transform: translateX(-8px);
+        animation: ruleSlideIn 0.35s ease forwards;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .correction-rule .rule-arrow { color: #999; margin: 0 4px; }
+      .correction-rule .rule-pattern { color: #c0392b; }
+      .correction-rule .rule-replacement { color: #27ae60; }
+      .correction-rule .rule-count { color: #7f8c8d; font-size: 10px; margin-left: 4px; }
+      @keyframes ruleSlideIn {
+        to { opacity: 1; transform: translateX(0); }
+      }
+      @keyframes ocrSavePulse {
+        0%   { opacity: 1; transform: scale(1); }
+        50%  { opacity: 0.6; transform: scale(1.15); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+      .ocr-save-anim {
+        display: inline-block;
+        animation: ocrSavePulse 0.7s ease-in-out infinite;
+        font-size: 13px;
+        letter-spacing: 1px;
+      }
+      @keyframes ocrSaveGlow {
+        0%   { background-position: 0% 50%; }
+        100% { background-position: 200% 50%; }
+      }
+      .ocr-save-shimmer {
+        background: linear-gradient(90deg, #6f42c1, #e74c3c, #f39c12, #28a745, #6f42c1);
+        background-size: 200% 100%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: ocrSaveGlow 1.5s linear infinite;
+        font-weight: 600;
+      }
+      .confidence-indicator { display: inline-block; padding: 2px 6px; border-radius: 3px; font-weight: bold; }
+      .confidence-high { background-color: #d4edda; color: #155724; }
+      .confidence-medium { background-color: #fff3cd; color: #856404; }
+      .confidence-low { background-color: #f8d7da; color: #721c24; }
+
+      /* Reject buttons on applied correction rules */
+      .correction-rule .rule-reject-btn {
+        background: #dc3545; color: white; border: none; border-radius: 3px;
+        padding: 1px 6px; font-size: 10px; cursor: pointer; margin-left: 6px;
+        opacity: 0.8; transition: opacity 0.2s;
+      }
+      .correction-rule .rule-reject-btn:hover { opacity: 1; }
+      .correction-rule.rejected { opacity: 0.4; text-decoration: line-through; }
+      .correction-rule.rejected .rule-reject-btn { display: none; }
+
+      /* Rules Manager Modal */
+      #rules-manager-backdrop {
+        display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.6); z-index: 300;
+      }
+      #rules-manager-modal {
+        position: fixed; top: 5%; left: 10%; right: 10%; bottom: 5%;
+        background: #fff; border-radius: 8px; display: flex; flex-direction: column;
+        overflow: hidden; z-index: 301; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      }
+      .rules-mgr-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 12px 20px; background: #f8f9fa; border-bottom: 1px solid #ddd;
+      }
+      .rules-mgr-header h3 { margin: 0; }
+      .rules-mgr-tabs { display: flex; gap: 8px; padding: 8px 20px; border-bottom: 1px solid #eee; }
+      .rules-mgr-tab {
+        padding: 6px 16px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;
+        font-size: 13px; background: #f8f9fa; transition: all 0.2s;
+      }
+      .rules-mgr-tab.active { background: #667eea; color: white; border-color: #667eea; }
+      .rules-mgr-body { flex: 1; overflow: auto; padding: 12px 20px; }
+      .rules-mgr-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .rules-mgr-table th {
+        background: #f0f0f0; padding: 6px 8px; text-align: left; border-bottom: 2px solid #ddd;
+        position: sticky; top: 0; z-index: 1;
+      }
+      .rules-mgr-table td {
+        padding: 5px 8px; border-bottom: 1px solid #eee; vertical-align: top;
+      }
+      .rules-mgr-table tr:hover { background: #f8f9fa; }
+      .rules-mgr-table .rm-pattern, .rules-mgr-table .rm-replacement {
+        font-family: 'Courier New', monospace; max-width: 280px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .rules-mgr-table .rm-pattern { color: #c0392b; }
+      .rules-mgr-table .rm-replacement { color: #27ae60; }
+      .rules-mgr-table input.rm-edit {
+        font-family: 'Courier New', monospace; font-size: 12px;
+        width: 100%; border: 1px solid #667eea; border-radius: 3px; padding: 2px 4px;
+      }
+      .rm-btn { border: none; border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
+      .rm-btn-edit { background: #ffc107; color: #333; }
+      .rm-btn-delete { background: #dc3545; color: white; }
+      .rm-btn-save { background: #28a745; color: white; }
+      .rm-btn-cancel { background: #6c757d; color: white; }
+      .rm-btn:hover { opacity: 0.85; }
+      .rules-mgr-footer { padding: 8px 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+      
+      #student-ocr-rendered {
+        width: 100%;
+        flex: 1;
+        overflow: auto;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 15px;
+        background: white;
+        font-size: 16px;
+        line-height: 2.8;
+        display: none;
+      }
+      
+      #student-ocr-rendered .MathJax {
+        margin: 8px 0;
+      }
+      
+      /* Full-screen Grading Modal */
+      #grading-modal-backdrop {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.8);
+        z-index: 200;
+      }
+      #grading-modal {
+        position: fixed;
+        top: 2%;
+        left: 2%;
+        right: 2%;
+        bottom: 2%;
+        background: #fff;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        z-index: 201;
+      }
+      .grading-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 15px 20px;
+        background: #f8f9fa;
+        border-bottom: 1px solid #ddd;
+      }
+      .grading-header h2 { margin: 0; }
+      .grading-body {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+      }
+      .grading-pane {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 120px;
+      }
+      .grading-splitter {
+        width: 6px;
+        cursor: col-resize;
+        background: #ddd;
+        flex-shrink: 0;
+        position: relative;
+        z-index: 5;
+        transition: background 0.15s;
+      }
+      .grading-splitter:hover,
+      .grading-splitter.active {
+        background: #667eea;
+      }
+      .grading-splitter::after {
+        content: '⋮';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #999;
+        font-size: 14px;
+        pointer-events: none;
+      }
+      .grading-splitter:hover::after,
+      .grading-splitter.active::after {
+        color: #fff;
+      }
+      .grading-pane-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 15px;
+        background: #e9ecef;
+        border-bottom: 1px solid #ddd;
+      }
+      .grading-pane-header h4 { margin: 0; font-size: 14px; }
+      .grading-pane-content {
+        flex: 1;
+        overflow: auto;
+        padding: 10px;
+      }
+      .grading-pane-content img {
+        max-width: 100%;
+        height: auto;
+        transform-origin: top left;
+        transition: transform 0.15s ease;
+      }
+      .zoom-controls {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+      .zoom-controls button {
+        padding: 3px 8px;
+        font-size: 14px;
+        background: #fff;
+        border: 1px solid #bbb;
+        border-radius: 4px;
+        cursor: pointer;
+        min-width: 30px;
+        line-height: 1;
+      }
+      .zoom-controls button:hover { background: #e2e6ea; }
+      .zoom-controls .zoom-level {
+        font-size: 11px;
+        color: #555;
+        min-width: 36px;
+        text-align: center;
+      }
+      .grading-pane-content iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+      }
+      .grading-results-pane {
+        min-width: 250px;
+        display: flex;
+        flex-direction: column;
+      }
+      .score-header {
+        text-align: center;
+        padding: 15px;
+        background: #f8f9fa;
+      }
+      .score-big {
+        font-size: 32px;
+        font-weight: bold;
+      }
+      .score-high { color: #28a745; }
+      .score-medium { color: #ffc107; }
+      .score-low { color: #dc3545; }
+      .grading-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .grading-table th, .grading-table td {
+        padding: 8px 10px;
+        text-align: left;
+        border-bottom: 1px solid #eee;
+      }
+      .grading-table td.req-cell {
+        font-size: 11px;
+        line-height: 1.4;
+        max-width: 250px;
+        overflow: hidden;
+        word-break: break-word;
+      }
+      .grading-table td.req-cell .MathJax {
+        font-size: 11px !important;
+      }
+      .grading-table th {
+        background: #f5f5f5;
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+      }
+      .grading-table tr.awarded { background: #e8f5e9; }
+      .grading-table tr.not-awarded { background: #ffebee; }
+      .grading-table tr.excluded-method { background: #f5f5f5; opacity: 0.5; }
+      .grading-table tr.corrected { background: #fff9c4 !important; }
+      .grading-table tr.implied-mark { border-left: 3px solid #9c27b0; }
+      #student-rendered-view {
+        font-size: 16px;
+        line-height: 1.8;
+        padding: 15px;
+      }
+      
+      /* Correction button styles */
+      .correction-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        padding: 0;
+        font-size: 14px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .correction-btn.btn-award {
+        background: #e8f5e9;
+        color: #28a745;
+        border: 1px solid #28a745;
+      }
+      .correction-btn.btn-award:hover {
+        background: #28a745;
+        color: white;
+      }
+      .correction-btn.btn-deny {
+        background: #ffebee;
+        color: #dc3545;
+        border: 1px solid #dc3545;
+      }
+      .correction-btn.btn-deny:hover {
+        background: #dc3545;
+        color: white;
+      }
+
+      /* Reasoning "?" button */
+      .reasoning-btn {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        padding: 0;
+        font-size: 12px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.2s;
+        background: #e3f2fd;
+        color: #1565c0;
+        border: 1px solid #90caf9;
+        margin-right: 4px;
+        vertical-align: middle;
+      }
+      .reasoning-btn:hover {
+        background: #1565c0;
+        color: white;
+        box-shadow: 0 2px 6px rgba(21,101,192,0.3);
+      }
+
+      /* Reasoning detail popover row */
+      .reasoning-panel-row td {
+        padding: 0 !important;
+        border: none !important;
+      }
+      .reasoning-detail-panel {
+        background: #e3f2fd;
+        border: 1px solid #90caf9;
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin: 4px 0;
+        font-size: 12px;
+        animation: reasonPanelSlide 0.25s ease-out;
+      }
+      @keyframes reasonPanelSlide {
+        from { opacity: 0; max-height: 0; padding: 0 14px; }
+        to   { opacity: 1; max-height: 500px; padding: 10px 14px; }
+      }
+      .reasoning-detail-panel .rdp-header {
+        font-weight: 700;
+        font-size: 13px;
+        margin-bottom: 8px;
+        color: #1565c0;
+      }
+      .reasoning-detail-panel .rdp-section {
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        padding: 8px 10px;
+        margin-bottom: 8px;
+        font-size: 11px;
+        line-height: 1.6;
+        color: #555;
+      }
+      .reasoning-detail-panel .rdp-label {
+        font-weight: 600;
+        color: #333;
+        display: inline-block;
+        min-width: 80px;
+      }
+      .reasoning-detail-panel .rdp-found { color: #2e7d32; font-weight: 600; }
+      .reasoning-detail-panel .rdp-missing { color: #c62828; font-weight: 600; }
+      .reasoning-detail-panel .rdp-strategy { color: #1565c0; font-weight: 600; font-size: 12px; }
+      .reasoning-detail-panel .rdp-verdict {
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 12px;
+        margin-top: 4px;
+      }
+      .reasoning-detail-panel .rdp-verdict.pass { background: #e8f5e9; color: #2e7d32; }
+      .reasoning-detail-panel .rdp-verdict.fail { background: #ffebee; color: #c62828; }
+      .reasoning-detail-panel .rdp-close {
+        float: right;
+        background: none;
+        border: none;
+        font-size: 16px;
+        cursor: pointer;
+        color: #999;
+        padding: 0 4px;
+      }
+      .reasoning-detail-panel .rdp-close:hover { color: #333; }
+
+      /* AI suggestion banner */
+      .ai-suggestion-banner {
+        margin-top: 12px;
+        padding: 12px 14px;
+        background: linear-gradient(135deg, #ede7f6 0%, #e3f2fd 100%);
+        border: 1px solid #b39ddb;
+        border-radius: 8px;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .ai-suggestion-banner .ai-header {
+        font-weight: 700;
+        font-size: 13px;
+        color: #5e35b1;
+        margin-bottom: 6px;
+      }
+      .ai-suggestion-banner .ai-body { color: #333; }
+      .ai-suggestion-banner .ai-loading {
+        color: #7e57c2;
+        font-style: italic;
+      }
+      
+      /* Implied mark badge */
+      .implied-badge {
+        display: inline-block;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 9px;
+        font-weight: bold;
+        background: #9c27b0;
+        color: white;
+        margin-left: 3px;
+        vertical-align: middle;
+      }
+      .implied-badge.dimmed {
+        background: #ce93d8;
+        opacity: 0.7;
+      }
+      
+      /* Method badge */
+      .method-badge {
+        display: inline-block;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 9px;
+        font-weight: bold;
+        background: #1976d2;
+        color: white;
+        margin-left: 3px;
+        vertical-align: middle;
+      }
+      .method-badge.dimmed {
+        background: #90caf9;
+        color: #666;
+        text-decoration: line-through;
+      }
+      
+      /* Inline correction detail panel */
+      .correction-detail-panel {
+        background: #fffde7;
+        border: 1px solid #f9a825;
+        border-radius: 6px;
+        padding: 12px 14px;
+        margin: 6px 0;
+        font-size: 12px;
+        animation: corrPanelSlide 0.2s ease-out;
+      }
+      @keyframes corrPanelSlide {
+        from { opacity: 0; max-height: 0; }
+        to   { opacity: 1; max-height: 400px; }
+      }
+      .correction-detail-panel .cdp-header {
+        font-weight: 700;
+        font-size: 13px;
+        margin-bottom: 8px;
+        color: #333;
+      }
+      .correction-detail-panel .cdp-reasoning {
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        padding: 8px 10px;
+        margin-bottom: 10px;
+        font-size: 11px;
+        line-height: 1.5;
+        color: #555;
+      }
+      .correction-detail-panel .cdp-reasoning .cdp-strategy {
+        font-weight: 600;
+        color: #1976d2;
+      }
+      .correction-detail-panel .cdp-reasoning .cdp-found {
+        color: #28a745;
+      }
+      .correction-detail-panel .cdp-reasoning .cdp-missing {
+        color: #dc3545;
+      }
+      .correction-detail-panel label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 3px;
+        color: #333;
+      }
+      .correction-detail-panel select,
+      .correction-detail-panel textarea {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: inherit;
+      }
+      .correction-detail-panel textarea {
+        min-height: 50px;
+        resize: vertical;
+      }
+      .correction-detail-panel .cdp-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .correction-detail-panel .cdp-actions button {
+        padding: 6px 16px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .cdp-confirm {
+        background: #f9a825;
+        color: #333;
+        border: 1px solid #f57f17;
+      }
+      .cdp-confirm:hover { background: #f57f17; color: #fff; }
+      .cdp-cancel {
+        background: #f5f5f5;
+        color: #666;
+        border: 1px solid #ccc;
+      }
+      .cdp-cancel:hover { background: #e0e0e0; }
+
+      /* Save corrections button */
+      #save-corrections-btn {
+        background: #4CAF50;
+        color: white;
+      }
+      #save-corrections-btn:disabled {
+        background: #aaa;
+      }
+      #review-rules-btn {
+        background: #9c27b0;
+        color: white;
+      }
+
+      /* Grading progress overlay */
+      .grading-progress-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(255,255,255,0.95);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        border-radius: 6px;
+      }
+      .grading-progress-overlay .spinner {
+        width: 40px; height: 40px;
+        border: 4px solid #e0e0e0;
+        border-top-color: #007bff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin-bottom: 16px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .grading-steps {
+        list-style: none;
+        padding: 0;
+        margin: 12px 0 0 0;
+        font-size: 13px;
+        line-height: 2;
+        text-align: left;
+        min-width: 280px;
+      }
+      .grading-steps li {
+        color: #999;
+        transition: color 0.3s;
+      }
+      .grading-steps li.active {
+        color: #007bff;
+        font-weight: 600;
+      }
+      .grading-steps li.done {
+        color: #28a745;
+      }
+      .grading-steps li::before {
+        content: '○ ';
+        font-size: 11px;
+      }
+      .grading-steps li.active::before {
+        content: '◉ ';
+        animation: pulse 1s ease-in-out infinite;
+      }
+      .grading-steps li.done::before {
+        content: '✓ ';
+        font-weight: bold;
+      }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+      /* OCR Verification banner */
+      .ocr-verify-banner {
+        margin-bottom: 12px;
+        padding: 10px 14px;
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        border-radius: 6px;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .ocr-auto { color: #28a745; font-weight: 600; }
+      .ocr-flag { color: #dc3545; font-weight: 600; }
+      .ocr-kept { color: #6c757d; }
+      .ocr-corrections-table {
+        border-collapse: collapse;
+      }
+      .ocr-corrections-table th,
+      .ocr-corrections-table td {
+        padding: 3px 8px;
+        border-bottom: 1px solid #dee2e6;
+        text-align: left;
+      }
+      .ocr-corrections-table th {
+        font-weight: 600;
+        background: #f8f9fa;
+      }
+      
+      /* Rules review modal */
+      .rules-list {
+        max-height: 400px;
+        overflow-y: auto;
+      }
+      .rule-item {
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        margin-bottom: 8px;
+        background: #fafafa;
+      }
+      .rule-item .rule-desc {
+        font-weight: 500;
+        margin-bottom: 5px;
+      }
+      .rule-item .rule-meta {
+        font-size: 11px;
+        color: #666;
+      }
+      .rule-actions {
+        margin-top: 8px;
+      }
+      .rule-actions button {
+        padding: 5px 12px;
+        font-size: 12px;
+        margin-right: 5px;
+      }
+      .btn-approve {
+        background: #28a745;
+        color: white;
+      }
+      .btn-reject {
+        background: #dc3545;
+        color: white;
+      }
     </style>
   </head>
   <body>
-    <h1>MSA Validation & Repair</h1>
+    <h1>MSA Validation & Repair <a href="?ui=exam" class="nav-link">📊 Exam Management</a></h1>
     
     <div id="controls">
+      <h3>Markscheme Processing</h3>
       <button id="process-doc-btn">Process Document</button>
       <button id="compare-btn" style="margin-left: 10px;">Compare Markscheme</button>
+    </div>
+    
+    <div id="controls">
+      <h3>Student Work OCR Test</h3>
+      <p style="margin: 5px 0; color: #666; font-size: 13px;">Test OCR on a single student work image (single-question test case)</p>
+      <button id="test-student-ocr-btn">Test Student Work OCR</button>
+      <div style="margin-top: 8px; display: flex; gap: 16px; font-size: 13px; color: #555;">
+        <label style="cursor: pointer;"><input type="checkbox" id="ocr-opt-corrections"> 5B/5C Corrections</label>
+        <label style="cursor: pointer;"><input type="checkbox" id="ocr-opt-opdigit" checked> 5E Op-digit fix</label>
+        <button id="manage-rules-btn" style="padding: 2px 10px; font-size: 12px; background: #667eea; color: white; border: none; border-radius: 3px; cursor: pointer;">📋 Manage Rules</button>
+      </div>
+      
+      <!-- OCR Progress Panel -->
+      <div id="ocr-progress" style="display: none; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 20px; position: relative;">
+        <div style="display: flex; flex-direction: column; align-items: center; padding: 20px 0;">
+          <div class="spinner"></div>
+          <div style="font-size: 15px; font-weight: 600; margin-bottom: 4px;">OCR in progress…</div>
+          <div id="ocr-progress-detail" style="font-size: 12px; color: #666;"></div>
+          <div style="display: flex; gap: 30px; margin-top: 12px;">
+            <ul class="grading-steps">
+              <li id="ocr-step-fetch">Fetching image from Drive</li>
+              <li id="ocr-step-compress">Compressing image</li>
+              <li id="ocr-step-ocr">Running Mathpix OCR</li>
+              <li id="ocr-step-qr">Decoding QR code</li>
+              <li id="ocr-step-position">Detecting position (Q1/Q2+)</li>
+              <li id="ocr-step-coords">Looking up box coordinates</li>
+              <li id="ocr-step-crop">Cropping to answer region</li>
+            </ul>
+            <ul class="grading-steps">
+              <li id="ocr-step-crossed">Crossed-off detection</li>
+              <li id="ocr-step-confidence">Calculating confidence</li>
+              <li id="ocr-step-preview">Building image preview</li>
+              <li id="ocr-step-package">Packaging results</li>
+              <li id="ocr-step-encode">Encoding image data</li>
+              <li id="ocr-step-transfer">Transferring to browser</li>
+              <li id="ocr-step-render-image">Loading image into view</li>
+              <li id="ocr-step-render-ocr">Populating OCR text</li>
+              <li id="ocr-step-render-meta">Updating metadata panel</li>
+              <li id="ocr-step-done">Done — opening modal</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="status-container">
       <h3>Status Log</h3>
       <div id="status"></div>
+    </div>
+
+    <!-- Server Debug Panel (live log stream) -->
+    <div id="debug-container" style="padding: 15px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 15px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+      <h3 style="cursor: pointer; user-select: none; margin: 0; display: flex; align-items: center;">
+        <span onclick="toggleDebugPanel()" style="flex: 1;">🔧 Server Debug Log <span id="debug-toggle-icon" style="font-size: 12px; color: #999;">▶ show</span>
+        <span id="debug-badge" style="display: none; background: #667eea; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle;">0</span></span>
+        <button onclick="copyDebugLog(event)" title="Copy debug log to clipboard" style="padding: 4px 10px; font-size: 12px; background: #e9ecef; border: 1px solid #ced4da; border-radius: 4px; cursor: pointer; font-weight: normal;">📋 Copy</button>
+      </h3>
+      <div id="debug-panel" style="display: none; margin-top: 10px;">
+        <div id="debug-log" style="min-height: 60px; max-height: 400px; background-color: #1e1e2e; color: #cdd6f4; padding: 10px; border-radius: 5px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.6;"></div>
+        <div style="margin-top: 6px; display: flex; gap: 8px; align-items: center;">
+          <button onclick="clearDebugLog()" style="padding: 4px 12px; font-size: 12px; background: #e9ecef; border: 1px solid #ced4da; border-radius: 4px;">Clear</button>
+          <span id="debug-status" style="font-size: 11px; color: #999;">Idle</span>
+        </div>
+      </div>
     </div>
 
     <div id="modal-backdrop" class="modal-backdrop">
@@ -57,32 +911,216 @@
     <div id="compare-modal-backdrop" class="modal-backdrop">
       <div id="compare-modal">
         <h3 id="compare-modal-title">Compare Markscheme</h3>
-        <div style="display: flex; height: 80vh;">
-          <div style="flex: 1; margin-right: 10px;">
+        <div style="display: flex; flex: 1; overflow: hidden;">
+          <div style="flex: 1; margin-right: 10px; display: flex; flex-direction: column;">
             <h4>Original Google Doc</h4>
-            <iframe id="compare-iframe-left" style="width: 100%; height: 100%; border: 1px solid #ccc;"></iframe>
+            <iframe id="compare-iframe-left" style="width: 100%; flex: 1; border: 1px solid #ccc;"></iframe>
           </div>
           <div style="flex: 1; display: flex; flex-direction: column;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <h4 id="right-pane-title">Rendered OCR Preview</h4>
               <button id="toggle-view-btn" style="display: none; margin-bottom: 5px;">Show Structured View</button>
             </div>
-            <div style="flex-grow: 1; position: relative;">
+            <div style="flex: 1; position: relative;">
               <iframe id="compare-iframe-right" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 1px solid #ccc;"></iframe>
               <iframe id="structured-preview-frame" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 1px solid #ccc; display: none;"></iframe>
             </div>
           </div>
         </div>
-        <br>
-        <button id="close-compare-btn">Close</button>
+        <div style="margin-top: 10px;">
+          <button id="close-compare-btn">Close</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Student OCR Test Modal -->
+    <div id="student-ocr-modal-backdrop" class="modal-backdrop">
+      <div id="student-ocr-modal">
+        <div class="modal-resize-handle" id="modal-resize-top" title="Drag to resize"></div>
+        <h3>Test Student Work OCR</h3>
+        <div class="student-ocr-content">
+          <div class="student-ocr-sections">
+            <div class="student-ocr-section">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h4 style="margin-top: 0;">Original Image</h4>
+                <div class="zoom-toolbar">
+                  <button id="zoom-out-btn" title="Zoom out">−</button>
+                  <span id="zoom-level-display" class="zoom-level">Fit</span>
+                  <button id="zoom-in-btn" title="Zoom in">+</button>
+                  <button id="zoom-fit-btn" title="Fit to view" style="font-size: 13px;">⊞ Fit</button>
+                </div>
+              </div>
+              <div class="image-preview-container" id="image-preview-container">
+                <img id="student-work-image" src="" alt="Student work will appear here">
+              </div>
+            </div>
+            <div class="split-resizer" id="split-resizer"></div>
+            <div class="student-ocr-section" id="ocr-section">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h4 style="margin: 0;">OCR Result</h4>
+                <button id="toggle-ocr-view-btn" style="padding: 5px 10px; font-size: 12px; background-color: #667eea; color: white;">Show Rendered</button>
+              </div>
+              <textarea id="student-ocr-textarea" placeholder="OCR text will appear here..." style="display: block;"></textarea>
+              <div id="student-ocr-rendered" style="display: none; flex: 1; overflow: auto; border: 1px solid #ddd; border-radius: 4px; padding: 15px; background: white; font-size: 14px; line-height: 1.6;"></div>
+              <div class="ocr-meta">
+                <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px; color: #333; border-bottom: 1px solid #ddd; padding-bottom: 4px;">📊 OCR Analysis</div>
+                <div class="ocr-meta-row"><strong>Confidence:</strong> <span id="ocr-confidence" class="confidence-indicator">-</span></div>
+                <div class="ocr-meta-row"><strong>Math Detected:</strong> <span id="ocr-math-detected">-</span></div>
+                <div class="ocr-meta-row"><strong>Markers Detected:</strong> <span id="ocr-markers-detected" style="font-weight: 500;">-</span></div>
+                <div class="ocr-meta-row"><strong>Crossed-Off Cleanup:</strong> <span id="ocr-crossed-off" style="font-weight: 500;">-</span></div>
+                <div class="ocr-meta-row"><strong>Notation Repair:</strong> <span id="ocr-notation-repair" style="font-weight: 500;">-</span></div>
+                <div class="correction-box learned" id="learned-correction-box">
+                  <div class="correction-header"><strong>Learned Corrections:</strong> <span id="ocr-learned" style="font-weight: 500;">-</span></div>
+                  <div class="correction-details" id="learned-correction-details"></div>
+                </div>
+                <div class="correction-box student" id="student-correction-box">
+                  <div class="correction-header"><strong>Student Profile:</strong> <span id="ocr-student-profile" style="font-weight: 500;">-</span></div>
+                  <div class="correction-details" id="student-correction-details"></div>
+                </div>
+                <div class="correction-box suggestions" id="suggestions-box" style="display: none;">
+                  <div class="correction-header"><strong>💡 Suggested Corrections:</strong> <span id="suggestions-count" style="font-weight: 500;">-</span></div>
+                  <div class="suggestion-list" id="suggestion-list"></div>
+                </div>
+                <div class="ocr-meta-row"><strong>Processing Time:</strong> <span id="ocr-processing-time">-</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 15px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+          <button id="grade-student-work-btn" style="background-color: #007bff; color: white;">🎯 Grade Work</button>
+          <button id="save-student-ocr-btn" style="background-color: #28a745; color: white;">Save Corrected OCR</button>
+          <button id="close-student-ocr-btn" style="background-color: #6c757d; color: white;">Close</button>
+          <span id="detected-question-code" style="margin-left: auto; font-size: 12px; color: #666;"></span>
+        </div>
+        
+        <!-- Grading Progress Overlay -->
+        <div id="grading-progress" style="display: none; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 20px; position: relative;">
+          <div style="display: flex; flex-direction: column; align-items: center; padding: 20px 0;">
+            <div class="spinner"></div>
+            <div style="font-size: 15px; font-weight: 600; margin-bottom: 4px;">Grading in progress…</div>
+            <div id="grading-progress-detail" style="font-size: 12px; color: #666;"></div>
+            <ul class="grading-steps">
+              <li id="gp-step-load">Loading mark scheme points</li>
+              <li id="gp-step-clean">Cleaning student OCR text</li>
+              <li id="gp-step-verify">OCR verification pass (glyph check)</li>
+              <li id="gp-step-grade">Grading each mark against student work</li>
+              <li id="gp-step-implied">Checking implied marks</li>
+              <li id="gp-step-method">Selecting best method per part</li>
+              <li id="gp-step-score">Calculating final score</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Grading Results Panel (hidden by default) -->
+        <div id="grading-results-panel" style="display: none; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 15px;">
+          <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+            <span>📊 Grading Results</span>
+            <span id="grade-score" style="font-size: 18px; font-weight: bold; color: #28a745;"></span>
+          </h4>
+          <div id="grading-breakdown" style="max-height: 200px; overflow-y: auto; font-size: 13px;"></div>
+        </div>
+        <div class="modal-resize-handle" id="modal-resize-bottom" title="Drag to resize" style="margin: 0 -15px -3px;"></div>
+      </div>
+    </div>
+    
+    <!-- Rules Manager Modal -->
+    <div id="rules-manager-backdrop">
+      <div id="rules-manager-modal">
+        <div class="rules-mgr-header">
+          <h3>📋 OCR Correction Rules Manager</h3>
+          <button id="close-rules-mgr-btn" style="background: #6c757d; color: white; border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer;">Close</button>
+        </div>
+        <div class="rules-mgr-tabs">
+          <button class="rules-mgr-tab active" data-tab="learned">🧠 Global Learned Rules</button>
+          <button class="rules-mgr-tab" data-tab="student">👤 Student Profile Rules</button>
+        </div>
+        <div class="rules-mgr-body" id="rules-mgr-body">
+          <div style="text-align: center; padding: 40px; color: #999;">Loading rules…</div>
+        </div>
+        <div class="rules-mgr-footer" id="rules-mgr-footer"></div>
+      </div>
+    </div>
+
+    <!-- Full-Screen Grading Modal -->
+    <div id="grading-modal-backdrop">
+      <div id="grading-modal">
+        <div class="grading-header">
+          <h2>📊 Grading: <span id="grading-question-code">-</span></h2>
+          <div>
+            <button id="close-grading-btn" style="background: #6c757d; color: white; padding: 8px 16px;">Close</button>
+          </div>
+        </div>
+        <div class="grading-body">
+          <!-- Left Pane: Student Work -->
+          <div class="grading-pane" id="left-pane">
+            <div class="grading-pane-header">
+              <h4>📝 Student Work</h4>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <div class="zoom-controls">
+                  <button id="zoom-out-btn" title="Zoom out">−</button>
+                  <span class="zoom-level" id="zoom-level-display">100%</span>
+                  <button id="zoom-in-btn" title="Zoom in">+</button>
+                  <button id="zoom-reset-btn" title="Reset zoom" style="font-size:11px;">⟲</button>
+                </div>
+              </div>
+            </div>
+            <div class="grading-pane-content" id="student-work-pane">
+              <img id="grading-student-image" src="" alt="Student work">
+              <div id="student-rendered-view" style="display: none;"></div>
+            </div>
+          </div>
+          
+          <div class="grading-splitter" id="splitter-left"></div>
+          
+          <!-- Middle Pane: Mark Scheme -->
+          <div class="grading-pane" id="middle-pane">
+            <div class="grading-pane-header">
+              <h4>📋 Mark Scheme</h4>
+              <button id="toggle-student-view-btn" style="padding: 4px 10px; font-size: 12px; background: #667eea; color: white;">Show Rendered OCR</button>
+            </div>
+            <div class="grading-pane-content" id="markscheme-pane">
+              <iframe id="grading-markscheme-frame" src="about:blank"></iframe>
+            </div>
+          </div>
+          
+          <div class="grading-splitter" id="splitter-right"></div>
+          
+          <!-- Right Pane: Grading Results -->
+          <div class="grading-pane grading-results-pane" id="right-pane">
+            <div class="score-header">
+              <div class="score-big" id="grading-score-display">- / -</div>
+              <div id="grading-percentage" style="font-size: 14px; color: #666;">-</div>
+            </div>
+            <div class="grading-pane-header">
+              <h4>Point-by-Point Breakdown</h4>
+            </div>
+            <div class="grading-pane-content" id="grading-points-list">
+              <!-- Points will be populated here -->
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
     <script>
       let currentDoc = null;
       let reviewData = null;
+      let currentStudentOcrData = null;
 
       window.addEventListener('load', function() {
+        // Get the web app URL from the server for Exam Management link
+        google.script.run
+          .withSuccessHandler(function(url) {
+            const examLink = document.querySelector('a.nav-link');
+            if (examLink) {
+              examLink.href = url; // Production URL defaults to Exam UI
+            }
+          })
+          .withFailureHandler(function(error) {
+            console.error('Failed to get web app URL:', error);
+          })
+          .getWebAppUrl();
+        
         log('Ready. Enter a document code to begin.');
       });
 
@@ -91,6 +1129,286 @@
       document.getElementById('submit-correction-btn').addEventListener('click', submitCorrection);
       document.getElementById('skip-btn').addEventListener('click', skipAndCloseModal);
       document.getElementById('close-compare-btn').addEventListener('click', () => { document.getElementById('compare-modal-backdrop').style.display = 'none'; });
+      document.getElementById('test-student-ocr-btn').addEventListener('click', testStudentOcr);
+      document.getElementById('close-student-ocr-btn').addEventListener('click', () => { document.getElementById('student-ocr-modal-backdrop').style.display = 'none'; });
+
+      // ── Split-pane resizer ──
+      (function() {
+        var resizer = document.getElementById('split-resizer');
+        var container = document.querySelector('.student-ocr-sections');
+        var leftPane = resizer.previousElementSibling;
+        var rightPane = document.getElementById('ocr-section');
+        var dragging = false;
+
+        resizer.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          dragging = true;
+          resizer.classList.add('active');
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', function(e) {
+          if (!dragging) return;
+          var rect = container.getBoundingClientRect();
+          var offset = e.clientX - rect.left;
+          var total = rect.width;
+          var pct = (offset / total) * 100;
+          pct = Math.max(20, Math.min(80, pct));
+          leftPane.style.flex = 'none';
+          leftPane.style.width = pct + '%';
+          rightPane.style.flex = 'none';
+          rightPane.style.width = (100 - pct) + '%';
+        });
+
+        document.addEventListener('mouseup', function() {
+          if (!dragging) return;
+          dragging = false;
+          resizer.classList.remove('active');
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+        });
+      })();
+
+      // ── Modal vertical resize handles ──
+      (function() {
+        var modal = document.getElementById('student-ocr-modal');
+        var topHandle = document.getElementById('modal-resize-top');
+        var bottomHandle = document.getElementById('modal-resize-bottom');
+        var dragging = null; // 'top' or 'bottom'
+
+        function startDrag(edge, e) {
+          e.preventDefault();
+          dragging = edge;
+          (edge === 'top' ? topHandle : bottomHandle).classList.add('active');
+          document.body.style.cursor = 'ns-resize';
+          document.body.style.userSelect = 'none';
+          // Switch from percentage to pixel positioning
+          var rect = modal.getBoundingClientRect();
+          modal.style.top = rect.top + 'px';
+          modal.style.bottom = (window.innerHeight - rect.bottom) + 'px';
+        }
+
+        topHandle.addEventListener('mousedown', function(e) { startDrag('top', e); });
+        bottomHandle.addEventListener('mousedown', function(e) { startDrag('bottom', e); });
+
+        document.addEventListener('mousemove', function(e) {
+          if (!dragging) return;
+          var minH = 300;
+          if (dragging === 'top') {
+            var bottom = parseFloat(modal.style.bottom);
+            var newTop = Math.max(0, Math.min(e.clientY, window.innerHeight - bottom - minH));
+            modal.style.top = newTop + 'px';
+          } else {
+            var top = parseFloat(modal.style.top);
+            var newBottom = Math.max(0, Math.min(window.innerHeight - e.clientY, window.innerHeight - top - minH));
+            modal.style.bottom = newBottom + 'px';
+          }
+        });
+
+        document.addEventListener('mouseup', function() {
+          if (!dragging) return;
+          topHandle.classList.remove('active');
+          bottomHandle.classList.remove('active');
+          dragging = null;
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+        });
+      })();
+
+      // ── Zoom controls for student work image (5% intervals) ──
+      (function() {
+        var ZOOM_STEP = 0.05;  // 5% per click
+        var ZOOM_MIN = 0.10;   // 10%
+        var ZOOM_MAX = 5.00;   // 500%
+        var zoomScale = 0;     // 0 = fit mode
+        var container = document.getElementById('image-preview-container');
+        var img = document.getElementById('student-work-image');
+        var display = document.getElementById('zoom-level-display');
+
+        function setFitMode() {
+          zoomScale = 0;
+          container.classList.remove('zoomed');
+          img.style.width = '';
+          img.style.height = '';
+          display.textContent = 'Fit';
+        }
+
+        function setZoom(scale) {
+          scale = Math.round(scale * 100) / 100;  // snap to nearest 1%
+          scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale));
+          zoomScale = scale;
+          container.classList.add('zoomed');
+          img.style.width = (img.naturalWidth * scale) + 'px';
+          img.style.height = 'auto';
+          display.textContent = Math.round(scale * 100) + '%';
+        }
+
+        function getFitScale() {
+          return container.clientWidth / (img.naturalWidth || 1);
+        }
+
+        document.getElementById('zoom-in-btn').addEventListener('click', function() {
+          var current = zoomScale === 0 ? getFitScale() : zoomScale;
+          // Snap to next 5% boundary above current
+          var next = Math.ceil(current / ZOOM_STEP) * ZOOM_STEP + ZOOM_STEP;
+          setZoom(next);
+        });
+
+        document.getElementById('zoom-out-btn').addEventListener('click', function() {
+          var current = zoomScale === 0 ? getFitScale() : zoomScale;
+          // Snap to next 5% boundary below current
+          var next = Math.floor(current / ZOOM_STEP) * ZOOM_STEP - ZOOM_STEP;
+          setZoom(next);
+        });
+
+        document.getElementById('zoom-fit-btn').addEventListener('click', setFitMode);
+
+        // Reset to fit when a new image loads
+        img.addEventListener('load', setFitMode);
+      })();
+      document.getElementById('save-student-ocr-btn').addEventListener('click', saveStudentOcrCorrection);
+      document.getElementById('grade-student-work-btn').addEventListener('click', gradeStudentWork);
+      document.getElementById('close-grading-btn').addEventListener('click', () => { document.getElementById('grading-modal-backdrop').style.display = 'none'; });
+
+      // ── Reject buttons on applied corrections (event delegation) ──
+      document.addEventListener('click', function(e) {
+        if (!e.target.classList.contains('rule-reject-btn')) return;
+        var ruleEl = e.target.closest('.correction-rule');
+        if (!ruleEl || ruleEl.classList.contains('rejected')) return;
+        var pattern = ruleEl.dataset.pattern;
+        var replacement = ruleEl.dataset.replacement;
+        if (!pattern && pattern !== '') return;
+        // Reverse: replace `replacement` back with `pattern` in the textarea
+        var textarea = document.getElementById('student-ocr-textarea');
+        var text = textarea.value;
+        var escaped = (replacement || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        var re = new RegExp(escaped, 'g');
+        textarea.value = text.replace(re, pattern);
+        ruleEl.classList.add('rejected');
+        e.target.textContent = '↩ Undone';
+        log('↩ Rejected correction: "' + pattern + '" → "' + replacement + '" — reversed in textarea', 'info');
+      });
+
+      // ── Rules Manager ──
+      document.getElementById('manage-rules-btn').addEventListener('click', openRulesManager_);
+      document.getElementById('close-rules-mgr-btn').addEventListener('click', function() {
+        document.getElementById('rules-manager-backdrop').style.display = 'none';
+      });
+      // Tab switching
+      document.querySelectorAll('.rules-mgr-tab').forEach(function(tab) {
+        tab.addEventListener('click', function() {
+          document.querySelectorAll('.rules-mgr-tab').forEach(function(t) { t.classList.remove('active'); });
+          this.classList.add('active');
+          loadRulesTab_(this.dataset.tab);
+        });
+      });
+
+      // --- Zoom controls for Student Work pane ---
+      var currentZoom_ = 1.0;
+      var ZOOM_STEP_ = 0.25;
+      var ZOOM_MIN_  = 0.25;
+      var ZOOM_MAX_  = 4.0;
+
+      function applyZoom_() {
+        var img = document.getElementById('grading-student-image');
+        if (img) img.style.transform = 'scale(' + currentZoom_ + ')';
+        document.getElementById('zoom-level-display').textContent = Math.round(currentZoom_ * 100) + '%';
+      }
+
+      document.getElementById('zoom-in-btn').addEventListener('click', function() {
+        if (currentZoom_ < ZOOM_MAX_) { currentZoom_ = Math.min(ZOOM_MAX_, currentZoom_ + ZOOM_STEP_); applyZoom_(); }
+      });
+      document.getElementById('zoom-out-btn').addEventListener('click', function() {
+        if (currentZoom_ > ZOOM_MIN_) { currentZoom_ = Math.max(ZOOM_MIN_, currentZoom_ - ZOOM_STEP_); applyZoom_(); }
+      });
+      document.getElementById('zoom-reset-btn').addEventListener('click', function() {
+        currentZoom_ = 1.0; applyZoom_();
+      });
+
+      // --- Resizable splitters ---
+      (function initSplitters() {
+        var leftPane   = document.getElementById('left-pane');
+        var middlePane = document.getElementById('middle-pane');
+        var rightPane  = document.getElementById('right-pane');
+        var splitterL  = document.getElementById('splitter-left');
+        var splitterR  = document.getElementById('splitter-right');
+        var body       = document.querySelector('.grading-body');
+        var activeSplitter = null;
+        var startX = 0;
+        var startLeftW = 0, startMiddleW = 0, startRightW = 0;
+
+        function initPaneWidths() {
+          var totalW = body.clientWidth - 12; // minus 2 splitters × 6px
+          leftPane.style.width   = Math.round(totalW * 0.35) + 'px';
+          middlePane.style.width = Math.round(totalW * 0.35) + 'px';
+          rightPane.style.width  = Math.round(totalW * 0.30) + 'px';
+          leftPane.style.flex   = 'none';
+          middlePane.style.flex = 'none';
+          rightPane.style.flex  = 'none';
+        }
+
+        function onMouseDown(e) {
+          e.preventDefault();
+          activeSplitter = e.target;
+          activeSplitter.classList.add('active');
+          startX = e.clientX;
+          startLeftW   = leftPane.offsetWidth;
+          startMiddleW = middlePane.offsetWidth;
+          startRightW  = rightPane.offsetWidth;
+          document.addEventListener('mousemove', onMouseMove);
+          document.addEventListener('mouseup', onMouseUp);
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+          // Disable pointer events on iframes during drag
+          var iframes = body.querySelectorAll('iframe');
+          for (var i = 0; i < iframes.length; i++) iframes[i].style.pointerEvents = 'none';
+        }
+
+        function onMouseMove(e) {
+          if (!activeSplitter) return;
+          var dx = e.clientX - startX;
+          var minW = 120;
+          if (activeSplitter === splitterL) {
+            var newLeft = Math.max(minW, startLeftW + dx);
+            var newMiddle = Math.max(minW, startMiddleW - dx);
+            if (newLeft >= minW && newMiddle >= minW) {
+              leftPane.style.width   = newLeft + 'px';
+              middlePane.style.width = newMiddle + 'px';
+            }
+          } else if (activeSplitter === splitterR) {
+            var newMiddle2 = Math.max(minW, startMiddleW + dx);
+            var newRight   = Math.max(minW, startRightW - dx);
+            if (newMiddle2 >= minW && newRight >= minW) {
+              middlePane.style.width = newMiddle2 + 'px';
+              rightPane.style.width  = newRight + 'px';
+            }
+          }
+        }
+
+        function onMouseUp() {
+          if (activeSplitter) activeSplitter.classList.remove('active');
+          activeSplitter = null;
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          var iframes = body.querySelectorAll('iframe');
+          for (var i = 0; i < iframes.length; i++) iframes[i].style.pointerEvents = '';
+        }
+
+        splitterL.addEventListener('mousedown', onMouseDown);
+        splitterR.addEventListener('mousedown', onMouseDown);
+
+        // Set initial widths when the grading modal becomes visible
+        var observer = new MutationObserver(function() {
+          if (document.getElementById('grading-modal-backdrop').style.display !== 'none') {
+            initPaneWidths();
+          }
+        });
+        observer.observe(document.getElementById('grading-modal-backdrop'), { attributes: true, attributeFilter: ['style'] });
+      })();
+      document.getElementById('toggle-student-view-btn').addEventListener('click', toggleGradingStudentView);
 
       function log(message, type = '') {
         const statusDiv = document.getElementById('status');
@@ -99,6 +1417,169 @@
         entry.textContent = new Date().toLocaleTimeString() + ': ' + message;
         statusDiv.appendChild(entry);
         statusDiv.scrollTop = statusDiv.scrollHeight;
+      }
+
+      /* ═══════════════════════════════════════════════════
+       * Server Debug Panel — live log streaming
+       * ═══════════════════════════════════════════════════ */
+      var debugSessionId_ = null;
+      var debugPollTimer_ = null;
+      var debugLogIndex_  = 0;   // next entry to fetch (array index on server)
+      var debugTotalCount_ = 0;
+      var debugPanelOpen_ = false;
+      var debugPollInFlight_ = false; // guard against overlapping async polls
+      var debugMaxSeq_ = -1;          // highest seq seen — for dedup
+
+      function toggleDebugPanel() {
+        debugPanelOpen_ = !debugPanelOpen_;
+        document.getElementById('debug-panel').style.display = debugPanelOpen_ ? 'block' : 'none';
+        document.getElementById('debug-toggle-icon').textContent = debugPanelOpen_ ? '▼ hide' : '▶ show';
+      }
+
+      /** Escape HTML special chars to prevent XSS when using innerHTML */
+      function escapeHtml_(str) {
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+      function clearDebugLog() {
+        document.getElementById('debug-log').innerHTML = '';
+        debugTotalCount_ = 0;
+        updateDebugBadge_(0);
+      }
+
+      function updateDebugBadge_(count) {
+        var badge = document.getElementById('debug-badge');
+        if (count > 0) {
+          badge.textContent = count;
+          badge.style.display = 'inline';
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+
+      /** Start a new log session and begin polling. Returns sessionId. */
+      function startDebugSession_() {
+        stopDebugPolling_();
+        clearDebugLog();
+        debugLogIndex_ = 0;
+        debugMaxSeq_ = -1;
+        document.getElementById('debug-status').textContent = 'Starting session…';
+
+        // Create session on server
+        return new Promise(function(resolve) {
+          google.script.run
+            .withSuccessHandler(function(sessionId) {
+              debugSessionId_ = sessionId;
+              document.getElementById('debug-status').textContent = '🟢 Streaming (session ' + sessionId.substring(0, 8) + '…)';
+              // Auto-open the panel so user sees the stream
+              if (!debugPanelOpen_) toggleDebugPanel();
+              // Start polling every 1 second
+              debugPollTimer_ = setInterval(pollServerLogs_, 1000);
+              resolve(sessionId);
+            })
+            .withFailureHandler(function(err) {
+              console.error('Failed to start log session:', err);
+              document.getElementById('debug-status').textContent = '❌ Session start failed';
+              resolve(null);
+            })
+            .startLogSession();
+        });
+      }
+
+      function pollServerLogs_() {
+        if (!debugSessionId_) return;
+        if (debugPollInFlight_) return; // skip if a previous poll hasn't returned yet
+        debugPollInFlight_ = true;
+        google.script.run
+          .withSuccessHandler(function(raw) {
+            debugPollInFlight_ = false;
+            try {
+              var entries = JSON.parse(raw || '[]');
+              if (entries.length === 0) return;
+
+              // ── Dedup by seq: only render entries we haven't seen ──
+              var newEntries = entries.filter(function(e) {
+                return (typeof e.seq === 'number') ? e.seq > debugMaxSeq_ : true;
+              });
+              if (newEntries.length === 0) return;
+
+              // Advance cursors
+              newEntries.forEach(function(e) {
+                if (typeof e.seq === 'number' && e.seq > debugMaxSeq_) debugMaxSeq_ = e.seq;
+              });
+              debugLogIndex_ += entries.length; // advance server-side cursor by raw count
+              debugTotalCount_ += newEntries.length;
+              updateDebugBadge_(debugTotalCount_);
+
+              var container = document.getElementById('debug-log');
+              newEntries.forEach(function(e) {
+                var div = document.createElement('div');
+                div.style.padding = '1px 4px';
+                div.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+                // Color by level
+                if (e.l === 'error') {
+                  div.style.color = '#f38ba8';
+                } else if (e.l === 'warn') {
+                  div.style.color = '#f9e2af';
+                } else {
+                  div.style.color = '#cdd6f4';
+                }
+                // Show relative timing (dt) when available
+                var timing = (typeof e.dt === 'number') ? ' +' + e.dt + 'ms' : '';
+                var icon = e.l === 'info' ? 'ℹ️' : e.l === 'warn' ? '⚠️' : '❌';
+                div.textContent = e.t + timing + '  ' + icon + '  ' + e.m;
+                container.appendChild(div);
+              });
+              container.scrollTop = container.scrollHeight;
+            } catch (parseErr) {
+              console.error('Debug poll parse error:', parseErr);
+            }
+          })
+          .withFailureHandler(function(err) {
+            debugPollInFlight_ = false;
+            // Silently ignore poll errors — server may have finished
+          })
+          .getServerLogs(debugSessionId_, debugLogIndex_);
+      }
+
+      function stopDebugPolling_() {
+        if (debugPollTimer_) {
+          clearInterval(debugPollTimer_);
+          debugPollTimer_ = null;
+        }
+        debugPollInFlight_ = false;
+        if (debugSessionId_) {
+          document.getElementById('debug-status').textContent = '⏹ Session ended (' + debugTotalCount_ + ' entries)';
+          debugSessionId_ = null;
+        }
+      }
+
+      /** Copy all debug log text to the clipboard. */
+      function copyDebugLog(evt) {
+        if (evt) evt.stopPropagation(); // don't toggle the panel
+        var el = document.getElementById('debug-log');
+        var text = '';
+        var entries = el.querySelectorAll('div');
+        entries.forEach(function(d) { text += d.textContent + '\n'; });
+        if (!text) { text = '(no log entries)'; }
+        navigator.clipboard.writeText(text).then(function() {
+          var btn = evt && evt.target;
+          if (btn) {
+            var orig = btn.textContent;
+            btn.textContent = '✅ Copied!';
+            setTimeout(function() { btn.textContent = orig; }, 1500);
+          }
+        }).catch(function() {
+          // Fallback for older browsers
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        });
       }
 
       function triggerProcessing(questionTitle) {
@@ -173,7 +1654,9 @@
         google.script.run.withSuccessHandler(data => {
           if (data.status === 'SUCCESS') {
             document.getElementById('compare-modal-title').textContent = `Compare: ${questionTitle}`;
-            document.getElementById('compare-iframe-left').src = data.sourceDocUrl;
+            // Add rm=minimal parameter to hide document outline/tabs
+            const docUrl = data.sourceDocUrl + (data.sourceDocUrl.includes('?') ? '&' : '?') + 'rm=minimal';
+            document.getElementById('compare-iframe-left').src = docUrl;
 
             // --- DUAL PREVIEW LOGIC ---
             const previewFrame = document.getElementById('compare-iframe-right');
@@ -226,6 +1709,1679 @@
           log(`Error fetching preview data: ${err.message}`, 'error');
           alert(`Error fetching preview data: ${err.message}`);
         }).getPreviewDataByTitle(questionTitle);
+      }
+      
+      // Student OCR Test Functions
+      
+      // OCR progress animation
+      var ocrProgressTimer_ = null;
+      
+      function showOcrProgress_() {
+        var panel = document.getElementById('ocr-progress');
+        panel.style.display = 'block';
+        // Reset all steps (across both columns)
+        var steps = ['ocr-step-fetch','ocr-step-compress','ocr-step-ocr','ocr-step-qr','ocr-step-position','ocr-step-coords','ocr-step-crop','ocr-step-crossed','ocr-step-confidence','ocr-step-preview','ocr-step-package','ocr-step-encode','ocr-step-transfer','ocr-step-render-image','ocr-step-render-ocr','ocr-step-render-meta','ocr-step-done'];
+        steps.forEach(function(id) {
+          var el = document.getElementById(id);
+          if (el) el.className = '';
+        });
+        // Animate steps with realistic timings matching actual backend flow (ms)
+        var timings = [0, 800, 1800, 4500, 7500, 8200, 9000, 9800, 10600, 11200, 12000, 12800, 13600, 14200, 14800, 15400, 16000];
+        var detailMsgs = [
+          'Loading student work image from Google Drive…',
+          'Image is large — resizing for optimal OCR…',
+          'Sending to Mathpix — converting handwriting to LaTeX…',
+          'Shrinking image & scanning QR code for question ID…',
+          'Checking for Section A header to determine Q1 vs Q2+…',
+          'Querying database for stored answer box coordinates…',
+          'Filtering OCR lines to just the answer region…',
+          'Scanning for CJK / crossed-off content…',
+          'Analyzing text quality and computing confidence…',
+          'Encoding image preview for display…',
+          'Packaging OCR text and metadata…',
+          'Encoding image as base64…',
+          'Transferring results to browser…',
+          'Loading student work image into view…',
+          'Populating OCR text and LaTeX…',
+          'Updating confidence and metadata…',
+          'Opening results modal…'
+        ];
+        var detailEl = document.getElementById('ocr-progress-detail');
+        ocrProgressTimer_ = [];
+        steps.forEach(function(id, i) {
+          var t = setTimeout(function() {
+            // Mark previous as done
+            if (i > 0) { var prev = document.getElementById(steps[i-1]); if (prev) prev.className = 'done'; }
+            var cur = document.getElementById(id); if (cur) cur.className = 'active';
+            detailEl.textContent = detailMsgs[i];
+          }, timings[i]);
+          ocrProgressTimer_.push(t);
+        });
+      }
+      
+      function hideOcrProgress_() {
+        // Clear any pending timers
+        (ocrProgressTimer_ || []).forEach(clearTimeout);
+        ocrProgressTimer_ = null;
+        // Mark all steps done
+        var steps = ['ocr-step-fetch','ocr-step-compress','ocr-step-ocr','ocr-step-qr','ocr-step-position','ocr-step-coords','ocr-step-crop','ocr-step-crossed','ocr-step-confidence','ocr-step-preview','ocr-step-package','ocr-step-encode','ocr-step-transfer','ocr-step-render-image','ocr-step-render-ocr','ocr-step-render-meta','ocr-step-done'];
+        steps.forEach(function(id) { var el = document.getElementById(id); if (el) el.className = 'done'; });
+        document.getElementById('ocr-progress-detail').textContent = 'Done!';
+        // Hide after a brief flash of "Done!"
+        setTimeout(function() {
+          document.getElementById('ocr-progress').style.display = 'none';
+        }, 600);
+      }
+      
+      /**
+       * Extract a Drive file ID from various input formats:
+       *  - Plain ID:  1aBcD_eFgHiJ
+       *  - Full URL:  https://drive.google.com/file/d/1aBcD_eFgHiJ/view
+       *  - Open URL:  https://drive.google.com/open?id=1aBcD_eFgHiJ
+       *  - Thumbnail: https://drive.google.com/thumbnail?id=1aBcD_eFgHiJ
+       */
+      function extractDriveFileId_(input) {
+        if (!input) return null;
+        var s = input.trim();
+        // /d/FILE_ID/ pattern (file, document, spreadsheets, presentation)
+        var m = s.match(/\/d\/([a-zA-Z0-9_-]{10,})/); 
+        if (m) return m[1];
+        // ?id=FILE_ID pattern (open, thumbnail, uc)
+        m = s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+        if (m) return m[1];
+        // If it looks like a bare ID (alphanumeric, hyphens, underscores, 10+ chars)
+        if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) return s;
+        return null;
+      }
+
+      async function testStudentOcr() {
+        const rawInput = prompt(
+          "Paste a Google Drive file ID or URL of a student work image:\n\n" +
+          "Accepted formats:\n" +
+          "• File ID: 1aBcDeFgHiJkLmNoPqRsTuVwXyZ\n" +
+          "• URL: https://drive.google.com/file/d/.../view",
+          "1qvroRqZCXz34K0iWtYBPYtswygGjJ14U"
+        );
+        if (!rawInput) return;
+
+        var fileId = extractDriveFileId_(rawInput);
+        if (!fileId) {
+          log('❌ Could not extract a valid file ID from: ' + rawInput, 'error');
+          return;
+        }
+        if (fileId !== rawInput.trim()) {
+          log('ℹ️ Extracted file ID: ' + fileId + '  (from URL)', 'info');
+        }
+
+        // Optional: question code for box-coordinate crop lookup
+        var questionCode = prompt(
+          "(Optional) Enter the question code for answer-box cropping:\n\n" +
+          "Examples: 22M.1.SL.TZ1.1, 23N.2.HL.TZ0.5\n" +
+          "Leave blank to auto-detect from OCR or skip cropping.",
+          ""
+        );
+        questionCode = (questionCode || '').trim() || null;
+        if (questionCode) {
+          log('ℹ️ Question code: ' + questionCode, 'info');
+        }
+        
+        let cropRegion = null;
+        
+        log('🔍 Starting OCR test on student work...', 'info');
+        document.getElementById('test-student-ocr-btn').disabled = true;
+        showOcrProgress_();
+        
+        // Start a debug log session so we can stream server logs live
+        var sessionId = await startDebugSession_();
+        
+        // Watchdog: if no response after 30s, show a timeout message
+        var ocrWatchdog_ = setTimeout(function() {
+          log('⏱️ No server response after 30 seconds. Server may still be processing — check the Debug Log below. Try clicking Test again (cached OCR is faster).', 'warn');
+          hideOcrProgress_();
+          document.getElementById('test-student-ocr-btn').disabled = false;
+          // Keep polling a bit longer — server may still be running
+          setTimeout(stopDebugPolling_, 15000);
+        }, 30000);
+
+        google.script.run
+          .withSuccessHandler(function(result) {
+            clearTimeout(ocrWatchdog_);
+            // Do one final poll to catch any last log entries, then stop
+            setTimeout(function() { pollServerLogs_(); stopDebugPolling_(); }, 1500);
+            handleStudentOcrResult(result);
+          })
+          .withFailureHandler(function(err) {
+            clearTimeout(ocrWatchdog_);
+            stopDebugPolling_();
+            console.error('[MSA] withFailureHandler FIRED:', err);
+            hideOcrProgress_();
+            log('❌ OCR test failed: ' + (err.message || err), 'error');
+            document.getElementById('test-student-ocr-btn').disabled = false;
+          })
+          .testStudentWorkOcr(fileId, {
+            cropRegion: cropRegion,
+            logSessionId: sessionId,
+            questionCode: questionCode,
+            enableCorrections: document.getElementById('ocr-opt-corrections').checked,
+            enableOpDigitFix: document.getElementById('ocr-opt-opdigit').checked
+          });
+      }
+      
+      function handleStudentOcrResult(raw) {
+        console.log('[MSA] handleStudentOcrResult FIRED, raw type=' + typeof raw, raw && raw.substring ? raw.substring(0, 120) : raw);
+        try {
+          hideOcrProgress_();
+          document.getElementById('test-student-ocr-btn').disabled = false;
+
+          if (!raw) {
+            log('⏱️ Server returned null — request may have timed out. Try again (cached OCR is faster on retry).', 'error');
+            return;
+          }
+
+          // Server now returns a JSON string to avoid google.script.run
+          // silently dropping complex nested objects.
+          var result;
+          if (typeof raw === 'string') {
+            try {
+              result = JSON.parse(raw);
+            } catch (parseErr) {
+              log('❌ Failed to parse server response: ' + parseErr.message, 'error');
+              console.error('Parse error, raw=', raw);
+              return;
+            }
+          } else {
+            result = raw;  // backward compat if object somehow comes through
+          }
+          console.log('[MSA] Parsed result, status=' + result.status);
+
+          if (result.status === 'success') {
+          currentStudentOcrData = result;
+          
+          // Populate the modal - show image preview
+          const imgElement = document.getElementById('student-work-image');
+          if (result.imageUrl) {
+            imgElement.removeAttribute('crossorigin');
+            imgElement.src = result.imageUrl;
+            imgElement.style.display = 'block';
+            imgElement.alt = result.isTiff ? 'TIFF preview (thumbnail)' : 'Student work';
+          } else {
+            imgElement.style.display = 'none';
+            imgElement.parentElement.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">⚠️ TIFF preview unavailable<br><small>OCR was performed on original TIFF file</small></div><img id="student-work-image" style="display:none;">';
+          }
+          
+          // Use cleaned OCR text (CJK chars stripped) if available, else raw
+          document.getElementById('student-ocr-textarea').value = result.cleanedOcrText || result.ocrText;
+          
+          // Set confidence indicator
+          const confidenceSpan = document.getElementById('ocr-confidence');
+          const confidence = Math.round(result.confidence * 100);
+          confidenceSpan.textContent = confidence + '%';
+          
+          if (confidence >= 85) {
+            confidenceSpan.className = 'confidence-indicator confidence-high';
+          } else if (confidence >= 70) {
+            confidenceSpan.className = 'confidence-indicator confidence-medium';
+          } else {
+            confidenceSpan.className = 'confidence-indicator confidence-low';
+          }
+          
+          document.getElementById('ocr-math-detected').textContent = result.mathDetected ? 'Yes' : 'No';
+          document.getElementById('ocr-processing-time').textContent = result.processingTime + ' ms';
+          
+          // Display marker detection status
+          const markersSpan = document.getElementById('ocr-markers-detected');
+          if (result.markersDetected && result.cropInfo) {
+            markersSpan.textContent = '✓ Yes';
+            markersSpan.style.color = '#28a745';
+            markersSpan.title = `Cropped to region: ${result.cropInfo.width}x${result.cropInfo.height}px`;
+          } else {
+            markersSpan.textContent = '✗ No';
+            markersSpan.style.color = '#dc3545';
+            markersSpan.title = 'Full image was processed';
+          }
+          
+          // Display crossed-off cleanup status
+          const crossedSpan = document.getElementById('ocr-crossed-off');
+          if (result.crossedOff && result.crossedOff.stats.cjkTextBlocks > 0) {
+            var charsRemoved = (result.ocrText || '').length - (result.cleanedOcrText || result.ocrText || '').length;
+            crossedSpan.textContent = '✂ ' + result.crossedOff.stats.cjkTextBlocks + ' CJK \\text{} block(s) stripped' +
+              (charsRemoved > 0 ? ' (' + charsRemoved + ' chars)' : '');
+            crossedSpan.style.color = '#e67e22';
+            crossedSpan.title = 'Isolated CJK characters inside \\text{} wrappers were removed (likely scribble misreads)';
+          } else {
+            crossedSpan.textContent = 'None detected';
+            crossedSpan.style.color = '#28a745';
+          }
+          
+          // Display notation structure repair status
+          const repairSpan = document.getElementById('ocr-notation-repair');
+          if (result.notationRepair && result.notationRepair.totalReplacements > 0) {
+            var repairs = result.notationRepair.applied;
+            repairSpan.textContent = '🔧 ' + repairs.length + ' notation repair(s)';
+            repairSpan.style.color = '#2980b9';
+            repairSpan.title = repairs.map(function(r) {
+              return '"' + r.from + '" → "' + r.to + '" (' + r.reason + ')';
+            }).join('\n');
+          } else {
+            repairSpan.textContent = 'None needed';
+            repairSpan.style.color = '#28a745';
+          }
+          
+          // Display learned corrections status with animated expansion
+          const learnedSpan = document.getElementById('ocr-learned');
+          const learnedBox = document.getElementById('learned-correction-box');
+          const learnedDetails = document.getElementById('learned-correction-details');
+          learnedDetails.innerHTML = '';
+          learnedBox.classList.remove('expanded');
+
+          if (result.learnedCorrections && result.learnedCorrections.stats.rulesApplied > 0) {
+            var lc = result.learnedCorrections;
+            learnedSpan.textContent = '🧠 ' + lc.stats.totalReplacements + ' replacement(s) from ' + lc.stats.rulesApplied + ' rule(s)';
+            learnedSpan.style.color = '#6f42c1';
+            learnedSpan.title = '';
+
+            // Build rule detail elements with reject buttons
+            lc.applied.forEach(function(a, idx) {
+              var rule = document.createElement('span');
+              rule.className = 'correction-rule';
+              rule.dataset.pattern = a.pattern;
+              rule.dataset.replacement = a.replacement || '';
+              rule.innerHTML = '<span class="rule-pattern">"' + escapeHtml_(a.pattern).substring(0, 30) + '"</span>'
+                + '<span class="rule-arrow">→</span>'
+                + '<span class="rule-replacement">"' + escapeHtml_(a.replacement || '').substring(0, 30) + '"</span>'
+                + '<span class="rule-count">×' + a.count + '</span>'
+                + '<button class="rule-reject-btn" data-type="learned" data-idx="' + idx + '" title="Undo this correction in the textarea">Reject</button>';
+              learnedDetails.appendChild(rule);
+            });
+
+            // Animate: expand the box and stagger the rules
+            setTimeout(function() {
+              learnedBox.classList.add('expanded');
+              var rules = learnedDetails.querySelectorAll('.correction-rule');
+              rules.forEach(function(el, i) {
+                el.style.animationDelay = (i * 120) + 'ms';
+              });
+            }, 300);
+
+          } else if (result.learnedCorrections && result.learnedCorrections.stats.rulesLoaded > 0) {
+            learnedSpan.textContent = result.learnedCorrections.stats.rulesLoaded + ' rules loaded, none matched';
+            learnedSpan.style.color = '#6c757d';
+          } else if (result.correctionsEnabled === false) {
+            learnedSpan.textContent = '⏸ Corrections disabled (5B/5C checkbox off)';
+            learnedSpan.style.color = '#e67e22';
+            learnedSpan.title = 'Enable the "5B/5C Corrections" checkbox above to apply learned rules';
+          } else {
+            learnedSpan.textContent = 'No rules yet';
+            learnedSpan.style.color = '#6c757d';
+            learnedSpan.title = 'Save corrected OCR to start teaching the system';
+          }
+          
+          // Display student profile status with animated expansion
+          const profileSpan = document.getElementById('ocr-student-profile');
+          const studentBox = document.getElementById('student-correction-box');
+          const studentDetails = document.getElementById('student-correction-details');
+          studentDetails.innerHTML = '';
+          studentBox.classList.remove('expanded');
+
+          if (result.studentProfile && result.studentProfile.stats.rulesApplied > 0) {
+            var sp = result.studentProfile;
+            profileSpan.textContent = '👤 ' + sp.stats.totalReplacements + ' fix(es) from ' + sp.stats.rulesApplied + ' personal rule(s)';
+            profileSpan.style.color = '#e74c3c';
+            profileSpan.title = '';
+
+            // Build rule detail elements with reject buttons
+            sp.applied.forEach(function(a, idx) {
+              var rule = document.createElement('span');
+              rule.className = 'correction-rule';
+              rule.dataset.pattern = a.pattern;
+              rule.dataset.replacement = a.replacement || '';
+              rule.innerHTML = '<span class="rule-pattern">"' + escapeHtml_(a.pattern).substring(0, 30) + '"</span>'
+                + '<span class="rule-arrow">→</span>'
+                + '<span class="rule-replacement">"' + escapeHtml_(a.replacement || '').substring(0, 30) + '"</span>'
+                + '<span class="rule-count">×' + a.count + ' (' + (a.strategy || 'exact') + ')</span>'
+                + '<button class="rule-reject-btn" data-type="student" data-idx="' + idx + '" title="Undo this correction in the textarea">Reject</button>';
+              studentDetails.appendChild(rule);
+            });
+
+            // Animate: expand the box with a delay after the learned box
+            var studentDelay = (result.learnedCorrections && result.learnedCorrections.stats.rulesApplied > 0)
+              ? 300 + (result.learnedCorrections.applied.length * 120) + 200
+              : 300;
+            setTimeout(function() {
+              studentBox.classList.add('expanded');
+              var rules = studentDetails.querySelectorAll('.correction-rule');
+              rules.forEach(function(el, i) {
+                el.style.animationDelay = (i * 120) + 'ms';
+              });
+            }, studentDelay);
+          } else if (result.studentProfile && result.studentProfile.summary && result.studentProfile.summary.totalRules > 0) {
+            var sum = result.studentProfile.summary;
+            profileSpan.textContent = sum.totalRules + ' rule(s) for ' + sum.studentId + ', none matched';
+            profileSpan.style.color = '#6c757d';
+            profileSpan.title = 'Top patterns:\n' + sum.topRules.slice(0, 5).map(function(r) {
+              return '"' + r.pattern + '" \u2192 "' + r.replacement + '" (\u00d7' + r.frequency + ')';
+            }).join('\n');
+          } else if (result.correctionsEnabled === false) {
+            profileSpan.textContent = '⏸ Student corrections disabled (5B/5C checkbox off)';
+            profileSpan.style.color = '#e67e22';
+          } else if (result.detectedStudentId) {
+            profileSpan.textContent = 'No profile yet for ' + result.detectedStudentId;
+            profileSpan.style.color = '#6c757d';
+            profileSpan.title = 'Save corrected OCR to build a personal profile for this student';
+          } else {
+            profileSpan.textContent = 'No student detected';
+            profileSpan.style.color = '#adb5bd';
+            profileSpan.title = 'No QR code found \u2014 student profile requires QR-encoded student ID';
+          }
+          
+          // Display mark-scheme-aware suggestions
+          var suggestionsBox = document.getElementById('suggestions-box');
+          var suggestionsCount = document.getElementById('suggestions-count');
+          var suggestionList = document.getElementById('suggestion-list');
+          suggestionList.innerHTML = '';
+          suggestionsBox.classList.remove('expanded');
+          suggestionsBox.style.display = 'none';
+
+          if (result.suggestions && result.suggestions.length > 0) {
+            suggestionsBox.style.display = 'block';
+            suggestionsCount.textContent = result.suggestions.length + ' possible correction(s) — review below';
+            suggestionsCount.style.color = '#e67e22';
+
+            result.suggestions.forEach(function(s, idx) {
+              var item = document.createElement('div');
+              item.className = 'suggestion-item';
+              item.style.animationDelay = (idx * 100) + 'ms';
+              item.dataset.ocrValue = s.ocrValue;
+              item.dataset.suggestedValue = s.suggestedValue;
+              item.innerHTML =
+                '<span class="sugg-ocr">"' + escapeHtml_(s.ocrValue) + '"</span>' +
+                '<span class="sugg-arrow">→</span>' +
+                '<span class="sugg-fix">"' + escapeHtml_(s.suggestedValue) + '"</span>' +
+                '<span class="sugg-reason">' + escapeHtml_(s.reason) + '</span>' +
+                '<button class="sugg-apply-btn" data-idx="' + idx + '">Apply</button>';
+              suggestionList.appendChild(item);
+            });
+
+            // Wire up Apply buttons
+            suggestionList.querySelectorAll('.sugg-apply-btn').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                var parentItem = this.closest('.suggestion-item');
+                if (parentItem.classList.contains('applied')) return;
+                var ocrVal = parentItem.dataset.ocrValue;
+                var fixVal = parentItem.dataset.suggestedValue;
+                var textarea = document.getElementById('student-ocr-textarea');
+                var text = textarea.value;
+                // Replace all occurrences of the OCR value with the suggested value
+                var escaped = ocrVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                var re = new RegExp(escaped, 'g');
+                textarea.value = text.replace(re, fixVal);
+                parentItem.classList.add('applied');
+                this.textContent = '✓ Applied';
+                log('✅ Applied suggestion: "' + ocrVal + '" → "' + fixVal + '"', 'info');
+              });
+            });
+
+            // Animate expansion
+            setTimeout(function() {
+              suggestionsBox.classList.add('expanded');
+            }, 500);
+          }
+
+          // Display detected question code
+          const qCodeSpan = document.getElementById('detected-question-code');
+          if (result.detectedQuestionCode) {
+            var qLabel = `📌 Question: ${result.detectedQuestionCode} (${result.detectedPosition || 'Q2+'})`;
+            if (result.detectedStudentId) qLabel += ` | Student: ${result.detectedStudentId}`;
+            if (result.detectedExamName) qLabel += ` | ${result.detectedExamName}`;
+            qCodeSpan.textContent = qLabel;
+            qCodeSpan.style.color = '#007bff';
+          } else {
+            qCodeSpan.textContent = '❓ No question code detected from QR';
+            qCodeSpan.style.color = '#6c757d';
+          }
+          
+          // Reset/hide grading results panel
+          document.getElementById('grading-results-panel').style.display = 'none';
+          
+          // Setup toggle between raw and rendered views
+          const toggleBtn = document.getElementById('toggle-ocr-view-btn');
+          const textarea = document.getElementById('student-ocr-textarea');
+          const renderedDiv = document.getElementById('student-ocr-rendered');
+          
+          let isRendered = false;
+          
+          toggleBtn.onclick = () => {
+            if (isRendered) {
+              // Show raw
+              textarea.style.display = 'block';
+              renderedDiv.style.display = 'none';
+              toggleBtn.textContent = 'Show Rendered';
+              isRendered = false;
+            } else {
+              // Show rendered - force stacked summation limits (above/below sigma)
+              const rawText = textarea.value;
+              // Add \limits after every \sum to force stacked notation
+              let displayText = rawText.replace(/\\sum(?!\\limits)/g, '\\sum\\limits');
+              renderedDiv.innerHTML = displayText;
+              textarea.style.display = 'none';
+              renderedDiv.style.display = 'block';
+              toggleBtn.textContent = 'Show Raw';
+              isRendered = true;
+              
+              // Trigger MathJax to render the LaTeX
+              if (window.MathJax) {
+                MathJax.typesetPromise([renderedDiv]).catch((err) => console.error('MathJax error:', err));
+              }
+            }
+          };
+          
+          // Show the modal
+          document.getElementById('student-ocr-modal-backdrop').style.display = 'block';
+          
+          log(`✅ OCR complete. Confidence: ${confidence}%`, confidence >= 85 ? 'success' : 'warn');
+        } else {
+          log(`❌ OCR failed: ${result.message}`, 'error');
+        }
+        } catch (uiErr) {
+          log(`❌ UI error in handleStudentOcrResult: ${uiErr.message}`, 'error');
+          console.error('handleStudentOcrResult error:', uiErr);
+        }
+      }
+      
+      // ── Save animation helpers ──
+      var saveAnimTimers_ = [];
+
+      function startSaveAnimation_() {
+        var learnedSpan = document.getElementById('ocr-learned');
+        var profileSpan = document.getElementById('ocr-student-profile');
+
+        // Emoji sequences that tell a mini "learning" story
+        var learnFrames = [
+          '📡 Diffing…',
+          '🔬 Extracting patterns…',
+          '🧬 Analyzing corrections…',
+          '🧠 Teaching the brain…',
+          '💡 Learning…',
+          '📚 Storing rules…',
+          '✨ Almost there…'
+        ];
+        var profileFrames = [
+          '🔍 Scanning handwriting…',
+          '✏️ Reading quirks…',
+          '🧩 Matching patterns…',
+          '👤 Building profile…',
+          '📝 Recording style…',
+          '🎯 Personalizing…',
+          '⚡ Finalizing…'
+        ];
+
+        var idx = 0;
+        function tick() {
+          var frame = idx % learnFrames.length;
+          if (learnedSpan) {
+            learnedSpan.innerHTML = '<span class="ocr-save-anim">' + learnFrames[frame] + '</span>';
+            learnedSpan.style.color = '';
+          }
+          if (profileSpan) {
+            profileSpan.innerHTML = '<span class="ocr-save-anim">' + profileFrames[frame] + '</span>';
+            profileSpan.style.color = '';
+          }
+          idx++;
+        }
+        tick();
+        saveAnimTimers_.push(setInterval(tick, 900));
+      }
+
+      function stopSaveAnimation_(success) {
+        saveAnimTimers_.forEach(clearInterval);
+        saveAnimTimers_ = [];
+        // Brief "done" flash before the real values overwrite
+        if (success) {
+          var learnedSpan = document.getElementById('ocr-learned');
+          var profileSpan = document.getElementById('ocr-student-profile');
+          if (learnedSpan) {
+            learnedSpan.innerHTML = '<span class="ocr-save-shimmer">✅ Updated!</span>';
+          }
+          if (profileSpan) {
+            profileSpan.innerHTML = '<span class="ocr-save-shimmer">✅ Updated!</span>';
+          }
+        }
+      }
+
+      function saveStudentOcrCorrection() {
+        if (!currentStudentOcrData) return;
+        
+        const correctedText = document.getElementById('student-ocr-textarea').value;
+        // Use the CLEANED text (what was displayed in the textarea) as the baseline,
+        // not the raw Mathpix output. The textarea was populated with cleanedOcrText,
+        // so the diff should only capture the user's MANUAL edits — not the automated
+        // CJK stripping, global corrections, or student profile corrections that
+        // were already applied before the user saw the text.
+        const originalText = currentStudentOcrData.cleanedOcrText || currentStudentOcrData.ocrText || '';
+        const questionCode = currentStudentOcrData.detectedQuestionCode || '';
+        const studentId = currentStudentOcrData.detectedStudentId || '';
+        const examName = currentStudentOcrData.detectedExamName || '';
+        
+        // Check if anything was actually changed
+        if (correctedText.trim() === originalText.trim()) {
+          log('ℹ️ No changes detected — nothing to save.', 'info');
+          return;
+        }
+        
+        var saveLabel = studentId ? ('student ' + studentId + ' / ' + questionCode) : questionCode;
+        log('💾 Saving corrected OCR for ' + saveLabel + '...', 'info');
+
+        // 🎬 Start the animation immediately
+        startSaveAnimation_();
+        
+        google.script.run
+          .withSuccessHandler(function(result) {
+            stopSaveAnimation_(true);
+            var msg = '✅ Corrected OCR saved';
+            if (result && result.studentId) {
+              msg += ' for student ' + result.studentId + ' / ' + result.questionCode;
+            }
+            msg += '.';
+            // Update the meta panel spans to reflect the new learning state
+            var globalNew = 0, globalReinforced = 0, globalTotal = 0;
+            if (result && result.learned) {
+              globalNew = result.learned.saved || 0;
+              globalReinforced = result.learned.updated || 0;
+              globalTotal = result.learned.total || 0;
+              if (globalNew > 0 || globalReinforced > 0) {
+                msg += ' 🧠 Global: ' + globalNew + ' new, ' +
+                       globalReinforced + ' reinforced (' + globalTotal + ' total).';
+              }
+            }
+            var studentNew = 0, studentReinforced = 0, studentTotal = 0;
+            if (result && result.studentLearned) {
+              studentNew = result.studentLearned.saved || 0;
+              studentReinforced = result.studentLearned.updated || 0;
+              studentTotal = result.studentLearned.total || 0;
+              if (studentNew > 0 || studentReinforced > 0) {
+                msg += ' 👤 Profile: ' + studentNew + ' new, ' +
+                       studentReinforced + ' reinforced (' + studentTotal + ' total).';
+              }
+            }
+            // ── Diagnostic: report correction extraction stats ──
+            if (result && result.diagnostics) {
+              var d = result.diagnostics;
+              msg += ' [diag: ' + d.correctionsExtracted + ' extracted, ' + d.correctionsFiltered + ' filtered]';
+            }
+            log(msg, 'success');
+
+            // ── Refresh OCR Analysis panel — ALWAYS update after save ──
+            // Brief delay so the "✅ Updated!" shimmer flash is visible
+            setTimeout(function() {
+              var learnedSpan = document.getElementById('ocr-learned');
+              if (learnedSpan) {
+                if (globalNew > 0 || globalReinforced > 0) {
+                  learnedSpan.innerHTML = '<span class="ocr-save-shimmer">🧠 ' + globalTotal + ' total rule(s) — just saved ' + globalNew + ' new, ' + globalReinforced + ' reinforced</span>';
+                  learnedSpan.title = 'Rules updated by your latest save';
+                } else if (globalTotal > 0) {
+                  learnedSpan.textContent = '🧠 ' + globalTotal + ' rule(s) — no new patterns this save';
+                  learnedSpan.style.color = '#6c757d';
+                  learnedSpan.title = 'Existing rules not affected by this save';
+                } else {
+                  learnedSpan.textContent = '🧠 Save complete — 0 learnable patterns found';
+                  learnedSpan.style.color = '#999';
+                  learnedSpan.title = 'The diff between original and corrected text produced no patterns that passed safety filters';
+                }
+                // Remove shimmer after 4s and settle to static color
+                setTimeout(function() {
+                  learnedSpan.style.color = (globalNew > 0 || globalReinforced > 0) ? '#6f42c1' : learnedSpan.style.color;
+                  if (learnedSpan.querySelector('.ocr-save-shimmer')) {
+                    learnedSpan.textContent = learnedSpan.textContent; // strips shimmer span
+                  }
+                }, 4000);
+              }
+              var profileSpan = document.getElementById('ocr-student-profile');
+              if (profileSpan && result && result.studentId) {
+                if (studentNew > 0 || studentReinforced > 0) {
+                  profileSpan.innerHTML = '<span class="ocr-save-shimmer">👤 ' + studentTotal + ' rule(s) for ' + result.studentId + ' — just saved ' + studentNew + ' new, ' + studentReinforced + ' reinforced</span>';
+                  profileSpan.title = 'Personal profile updated by your latest save';
+                } else if (studentTotal > 0) {
+                  profileSpan.textContent = '👤 ' + studentTotal + ' rule(s) for ' + result.studentId + ' — no new patterns';
+                  profileSpan.style.color = '#6c757d';
+                  profileSpan.title = 'Existing student rules not affected by this save';
+              } else {
+                profileSpan.textContent = '👤 Save complete for ' + result.studentId + ' — 0 learnable patterns';
+                profileSpan.style.color = '#999';
+                profileSpan.title = 'No patterns passed safety filters for this student';
+              }
+              // Remove shimmer after 4s
+              setTimeout(function() {
+                profileSpan.style.color = (studentNew > 0 || studentReinforced > 0) ? '#e74c3c' : profileSpan.style.color;
+                if (profileSpan.querySelector('.ocr-save-shimmer')) {
+                  profileSpan.textContent = profileSpan.textContent;
+                }
+              }, 4000);
+            }
+            }, 500); // end setTimeout delay for shimmer flash
+          })
+          .withFailureHandler(err => {
+            stopSaveAnimation_(false);
+            var learnedSpan = document.getElementById('ocr-learned');
+            var profileSpan = document.getElementById('ocr-student-profile');
+            if (learnedSpan) { learnedSpan.textContent = '❌ Save failed'; learnedSpan.style.color = '#dc3545'; }
+            if (profileSpan) { profileSpan.textContent = '❌ Save failed'; profileSpan.style.color = '#dc3545'; }
+            log(`❌ Failed to save: ${err.message}`, 'error');
+            alert(`Error saving: ${err.message}`);
+          })
+          .saveStudentOcrCorrection(
+            currentStudentOcrData.fileId,
+            correctedText,
+            originalText,
+            questionCode,
+            studentId,
+            examName
+          );
+      }
+      
+      // Grading progress animation
+      var gradingProgressTimer_ = null;
+      
+      function showGradingProgress_() {
+        var panel = document.getElementById('grading-progress');
+        panel.style.display = 'block';
+        // Reset all steps
+        var steps = ['gp-step-load','gp-step-clean','gp-step-verify','gp-step-grade','gp-step-implied','gp-step-method','gp-step-score'];
+        steps.forEach(function(id) {
+          var el = document.getElementById(id);
+          el.className = '';
+        });
+        // Animate steps with realistic timings (ms)
+        var timings = [0, 400, 1200, 2500, 5000, 7000, 8500];
+        var detailMsgs = [
+          'Fetching mark scheme data from Drive…',
+          'Removing printed question text…',
+          'Cross-checking digits with glyph confusion matrix…',
+          'Comparing student answers to each marking point…',
+          'Checking if correct answers imply earlier steps…',
+          'Picking highest-scoring method per part…',
+          'Totalling marks…'
+        ];
+        var detailEl = document.getElementById('grading-progress-detail');
+        gradingProgressTimer_ = [];
+        steps.forEach(function(id, i) {
+          var t = setTimeout(function() {
+            // Mark previous as done
+            if (i > 0) document.getElementById(steps[i-1]).className = 'done';
+            document.getElementById(id).className = 'active';
+            detailEl.textContent = detailMsgs[i];
+          }, timings[i]);
+          gradingProgressTimer_.push(t);
+        });
+      }
+      
+      function hideGradingProgress_() {
+        // Clear any pending timers
+        (gradingProgressTimer_ || []).forEach(clearTimeout);
+        gradingProgressTimer_ = null;
+        // Mark all steps done
+        var steps = ['gp-step-load','gp-step-clean','gp-step-verify','gp-step-grade','gp-step-implied','gp-step-method','gp-step-score'];
+        steps.forEach(function(id) { document.getElementById(id).className = 'done'; });
+        document.getElementById('grading-progress-detail').textContent = 'Done!';
+        // Hide after a brief flash of "Done!"
+        setTimeout(function() {
+          document.getElementById('grading-progress').style.display = 'none';
+        }, 600);
+      }
+
+      function gradeStudentWork() {
+        if (!currentStudentOcrData) {
+          alert('No student work loaded. Please run OCR first.');
+          return;
+        }
+        
+        // Get the question code - either from auto-detection or prompt
+        let questionCode = currentStudentOcrData.detectedQuestionCode;
+        if (!questionCode) {
+          questionCode = prompt('Enter the question code (e.g., 14M.2.AHL.TZ2.H_1):', '');
+          if (!questionCode) return;
+        }
+        
+        const studentText = document.getElementById('student-ocr-textarea').value;
+        if (!studentText.trim()) {
+          alert('No OCR text available. Please ensure OCR was successful.');
+          return;
+        }
+        
+        log(`🎯 Grading student work for ${questionCode}...`, 'info');
+        document.getElementById('grade-student-work-btn').disabled = true;
+        showGradingProgress_();
+        
+        // Store for use in the grading modal
+        currentStudentOcrData.questionCode = questionCode;
+        currentStudentOcrData.studentText = studentText;
+        
+        google.script.run
+          .withSuccessHandler(handleGradingResult)
+          .withFailureHandler(err => {
+            hideGradingProgress_();
+            log(`❌ Grading failed: ${err.message}`, 'error');
+            document.getElementById('grade-student-work-btn').disabled = false;
+            alert(`Grading error: ${err.message}`);
+          })
+          .gradeStudentWorkWithMarkscheme(studentText, questionCode, currentStudentOcrData.detectedStudentId || '');
+      }
+      
+      let gradingStudentViewMode = 'markscheme'; // 'markscheme' or 'rendered'
+      
+      function toggleGradingStudentView() {
+        const frame = document.getElementById('grading-markscheme-frame');
+        const rendered = document.getElementById('student-rendered-view');
+        const btn = document.getElementById('toggle-student-view-btn');
+        
+        if (gradingStudentViewMode === 'markscheme') {
+          frame.style.display = 'none';
+          // Move rendered view into the middle pane if needed
+          var paneContent = document.getElementById('markscheme-pane');
+          if (rendered.parentElement !== paneContent) {
+            paneContent.appendChild(rendered);
+          }
+          rendered.style.display = 'block';
+          btn.textContent = 'Show Mark Scheme';
+          gradingStudentViewMode = 'rendered';
+          
+          // Trigger MathJax rendering
+          if (window.MathJax) {
+            MathJax.typesetPromise([rendered]).catch(err => console.error('MathJax error:', err));
+          }
+        } else {
+          frame.style.display = 'block';
+          rendered.style.display = 'none';
+          btn.textContent = 'Show Rendered OCR';
+          gradingStudentViewMode = 'markscheme';
+        }
+      }
+      
+      function handleGradingResult(result) {
+        hideGradingProgress_();
+        document.getElementById('grade-student-work-btn').disabled = false;
+        
+        if (result.status === 'success') {
+          // Store the result for correction handling
+          window.currentGradingResult = result;
+          
+          // Open the full-screen grading modal
+          document.getElementById('grading-modal-backdrop').style.display = 'block';
+          
+          // Set the question code header
+          document.getElementById('grading-question-code').textContent = result.questionCode;
+          
+          // Set up student work pane
+          const studentImg = document.getElementById('grading-student-image');
+          if (currentStudentOcrData && currentStudentOcrData.imageUrl) {
+            studentImg.src = currentStudentOcrData.imageUrl;
+            studentImg.style.display = 'block';
+          }
+          
+          // Set up rendered OCR view (lives in middle pane, toggled with mark scheme)
+          const renderedView = document.getElementById('student-rendered-view');
+          let displayText = (currentStudentOcrData.studentText || '').replace(/\\sum(?!\\limits)/g, '\\sum\\limits');
+          renderedView.innerHTML = displayText;
+          renderedView.style.display = 'none';
+          gradingStudentViewMode = 'markscheme';
+          document.getElementById('toggle-student-view-btn').textContent = 'Show Rendered OCR';
+          // Ensure rendered view is inside the middle pane
+          var markschemePane = document.getElementById('markscheme-pane');
+          if (renderedView.parentElement !== markschemePane) {
+            markschemePane.appendChild(renderedView);
+          }
+          
+          // Load mark scheme preview if available
+          const markschemeFrame = document.getElementById('grading-markscheme-frame');
+          if (result.markschemeHtml) {
+            markschemeFrame.srcdoc = result.markschemeHtml;
+          } else {
+            markschemeFrame.srcdoc = '<div style="padding: 20px; color: #666; text-align: center;">Mark scheme preview not available.<br><br>Process the mark scheme document first to generate the preview.</div>';
+          }
+          
+          // Display the score
+          const pct = result.score.percentage;
+          const scoreDisplay = document.getElementById('grading-score-display');
+          scoreDisplay.textContent = `${result.score.awarded} / ${result.score.possible}`;
+          scoreDisplay.className = 'score-big ' + (pct >= 70 ? 'score-high' : pct >= 50 ? 'score-medium' : 'score-low');
+          document.getElementById('grading-percentage').textContent = `${pct}%`;
+          
+          // Build the points breakdown table with correction buttons
+          const pointsList = document.getElementById('grading-points-list');
+          let html = '';
+          
+          // OCR Verification banner (if corrections/flags exist)
+          if (result.ocrVerification && (result.ocrVerification.corrected > 0 || result.ocrVerification.flagged > 0)) {
+            html += '<div class="ocr-verify-banner">';
+            html += '<strong>🔍 OCR Verification Pass</strong>';
+            if (result.ocrVerification.corrected > 0) {
+              html += ` — <span class="ocr-auto">${result.ocrVerification.corrected} auto-corrected</span>`;
+            }
+            if (result.ocrVerification.flagged > 0) {
+              html += ` — <span class="ocr-flag">${result.ocrVerification.flagged} flagged for review</span>`;
+            }
+            html += '<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:11px;">Show details</summary>';
+            html += '<table class="ocr-corrections-table" style="font-size:11px;margin-top:4px;width:100%;">';
+            html += '<tr><th>OCR Read</th><th>Corrected To</th><th>Why</th><th>Action</th></tr>';
+            (result.ocrVerification.corrections || []).forEach(function(c) {
+              var actionClass = c.action === 'auto_corrected' ? 'ocr-auto' :
+                                c.action === 'flagged_for_review' ? 'ocr-flag' : 'ocr-kept';
+              var actionLabel = c.action === 'auto_corrected' ? '✅ Auto-corrected' :
+                                c.action === 'flagged_for_review' ? '⚠️ Needs review' : '↩ Kept original';
+              html += '<tr>';
+              html += '<td><code style="color:#dc3545;">' + c.ocrValue + '</code></td>';
+              html += '<td><code style="color:#28a745;">' + c.expectedValue + '</code></td>';
+              html += '<td>' + (c.explanation || '') + '</td>';
+              html += '<td class="' + actionClass + '">' + actionLabel + '</td>';
+              html += '</tr>';
+            });
+            html += '</table></details></div>';
+          }
+          
+          html += '<table class="grading-table">';
+          html += '<tr><th style="width: 60px;">Part</th><th style="width: 50px;">Mark</th><th>Requirement</th><th style="width: 90px;">Correct</th></tr>';
+          
+          result.results.forEach((res, idx) => {
+            const status = res.awarded ? '✅' : '❌';
+            const markStr = (res.marks || []).join('');
+            const reqText = res.requirement || '';
+            const rowClass = res.awarded ? 'awarded' : (res.excludedByMethod ? 'excluded-method' : 'not-awarded');
+            const impliedClass = res.isImplied ? ' implied-mark' : '';
+            const part = res.part ? `(${res.part})` : '';
+            const impliedBadge = res.awardedByImplication ? '<span class="implied-badge" title="Awarded by implication">IMP</span>' : 
+                                 (res.isImplied ? '<span class="implied-badge dimmed" title="Implied mark (parenthesized)">(IMP)</span>' : '');
+            const methodBadge = res.branch && res.branch.startsWith('METHOD') ? 
+                                `<span class="method-badge${res.excludedByMethod ? ' dimmed' : ''}" title="${res.excludedByMethod ? 'Not selected (best: ' + (res.selectedMethod || '') + ')' : 'Selected method'}">${res.branch.replace('METHOD','M')}</span>` : '';
+            
+            // Encode details for the correction panel (safe for HTML attribute)
+            const detailsJson = JSON.stringify(res.details || {}).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+            html += `<tr class="${rowClass}${impliedClass}" data-point-idx="${idx}" data-details="${detailsJson}">`;
+            html += `<td>${status} ${part} ${impliedBadge} ${methodBadge}</td>`;
+            html += `<td style="text-align: center;">${markStr}</td>`;
+            html += `<td class="req-cell">${reqText}</td>`;
+            html += `<td style="text-align: center;">`;
+            html += `<button class="reasoning-btn" onclick="openReasoningPanel(${idx})" title="Why was this mark ${res.awarded ? 'awarded' : 'not awarded'}? Click to see grader reasoning.">?</button>`;
+            html += `<button class="correction-btn ${res.awarded ? 'btn-deny' : 'btn-award'}" onclick="openCorrectionPanel(${idx})" title="${res.awarded ? 'Remove this mark' : 'Award this mark'}">`;
+            html += res.awarded ? '✗' : '✓';
+            html += `</button>`;
+            html += `</td>`;
+            html += '</tr>';
+            // Placeholder row for the reasoning detail panel (hidden by default)
+            html += `<tr class="reasoning-panel-row" id="rdp-row-${idx}" style="display:none;"><td colspan="4" style="padding:0;"></td></tr>`;
+            // Placeholder row for the correction detail panel (hidden by default)
+            html += `<tr class="correction-panel-row" id="cdp-row-${idx}" style="display:none;"><td colspan="4" style="padding:0;"></td></tr>`;
+          });
+          
+          html += '</table>';
+          
+          // AI suggestion placeholder
+          html += '<div id="ai-suggestion-container"></div>';
+          
+          // Add part breakdown summary
+          if (result.breakdown && result.breakdown.length > 0) {
+            html += '<div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 11px;"><strong>Summary:</strong><br>';
+            result.breakdown.forEach(b => {
+              html += b + '<br>';
+            });
+            html += '</div>';
+          }
+          
+          // Add save corrections button
+          html += '<div style="margin-top: 15px; display: flex; gap: 10px;">';
+          html += '<button id="save-corrections-btn" class="btn btn-primary" onclick="saveGradingCorrections()" disabled>Save Corrections</button>';
+          html += '<button id="review-rules-btn" class="btn btn-secondary" onclick="reviewLearnedRules()">Review AI Rules</button>';
+          html += '</div>';
+          
+          pointsList.innerHTML = html;
+          
+          // Render LaTeX in the requirement cells
+          if (typeof MathJax !== 'undefined' && MathJax.typesetPromise) {
+            MathJax.typesetPromise([pointsList]).catch(function(err) {
+              console.warn('MathJax typeset error:', err);
+            });
+          }
+          
+          // Also update the small panel (for backwards compatibility)
+          const panel = document.getElementById('grading-results-panel');
+          panel.style.display = 'block';
+          const scoreSpan = document.getElementById('grade-score');
+          scoreSpan.textContent = `${result.score.awarded} / ${result.score.possible} (${pct}%)`;
+          scoreSpan.style.color = pct >= 70 ? '#28a745' : pct >= 50 ? '#ffc107' : '#dc3545';
+          
+          log(`✅ Grading complete: ${result.score.awarded}/${result.score.possible} (${pct}%)`, pct >= 70 ? 'success' : 'warn');
+          
+          // Request AI suggestion asynchronously
+          requestAiSuggestion_(result);
+        } else {
+          log(`❌ Grading failed: ${result.message}`, 'error');
+          alert(`Grading error: ${result.message}`);
+        }
+      }
+      
+      // Track corrections made by teacher
+      window.gradingCorrections = {};
+
+      /** Map strategy type codes to human-readable labels */
+      var STRATEGY_LABELS = {
+        'assignment':          '🎯 Strategy 1: Exact Assignment Match (e.g. n = 27)',
+        'contextual_numeric':  '📍 Strategy 2: Contextual Number Match (number near part marker)',
+        'numeric':             '🔢 Strategy 3: Global Numeric Match (number found anywhere in text)',
+        'keyword':             '📝 Strategy 4: Keyword Match',
+        'sigma':               '∑  Strategy 0: Sigma/Summation Equivalence',
+        'none':                '⚠️ No matching strategy could be applied'
+      };
+
+      /** Reason categories for teacher corrections */
+      var CORRECTION_REASONS = [
+        { value: '', label: '— Select a reason —' },
+        { value: 'wrong_part', label: 'Number/evidence is from a different part' },
+        { value: 'coincidental', label: 'Number is coincidental, not the required value' },
+        { value: 'notation_diff', label: 'Student used different notation (should match)' },
+        { value: 'implied_work', label: 'Correct answer implies this step was done' },
+        { value: 'partial_credit', label: 'Partial work deserves credit' },
+        { value: 'method_wrong', label: 'Wrong method selected — should use different method' },
+        { value: 'ocr_error', label: 'OCR misread — student actually wrote something different' },
+        { value: 'mark_scheme_issue', label: 'Mark scheme parsing issue — requirement is wrong' },
+        { value: 'other', label: 'Other (explain in notes)' }
+      ];
+
+      /**
+       * Build the "grader reasoning" HTML from a result's details object.
+       */
+      function buildReasoningHtml_(details) {
+        if (!details || details.type === 'none') {
+          return '<em>No matching strategy fired. The grader found nothing to compare.</em>';
+        }
+        var html = '<span class="cdp-strategy">' + (STRATEGY_LABELS[details.type] || details.type) + '</span><br>';
+        if (details.required && details.required.length) {
+          html += '<strong>Required:</strong> ' + details.required.join(', ') + '<br>';
+        }
+        if (details.found && details.found.length) {
+          html += '<strong>Found:</strong> <span class="cdp-found">' + details.found.join(', ') + '</span><br>';
+        }
+        if (details.missing && details.missing.length) {
+          html += '<strong>Missing:</strong> <span class="cdp-missing">' + details.missing.join(', ') + '</span><br>';
+        }
+        if (details.student_numbers && details.student_numbers.length) {
+          html += '<strong>All student numbers:</strong> ' + details.student_numbers.slice(0, 20).join(', ');
+          if (details.student_numbers.length > 20) html += ' … (' + details.student_numbers.length + ' total)';
+          html += '<br>';
+        }
+        if (details.impliedReason) {
+          html += '<strong>Implication:</strong> ' + details.impliedReason + '<br>';
+        }
+        if (details.learnedRule) {
+          html += '<strong>Learned rule:</strong> ' + details.learnedRule + '<br>';
+        }
+        return html;
+      }
+
+      /**
+       * Open the read-only reasoning popover below a marking point row.
+       * Shows detailed grader logic without enabling corrections.
+       */
+      function openReasoningPanel(idx) {
+        if (!window.currentGradingResult || !window.currentGradingResult.results) return;
+
+        var panelRow = document.getElementById('rdp-row-' + idx);
+        if (!panelRow) return;
+
+        // Toggle off if already open
+        if (panelRow.style.display === 'table-row') {
+          panelRow.style.display = 'none';
+          panelRow.querySelector('td').innerHTML = '';
+          return;
+        }
+
+        // Close any other open reasoning panels
+        document.querySelectorAll('.reasoning-panel-row[style*="table-row"]').forEach(function(r) {
+          r.style.display = 'none';
+          r.querySelector('td').innerHTML = '';
+        });
+
+        var res = window.currentGradingResult.results[idx];
+        var details = res.details || {};
+        var awarded = res.awarded;
+        var partLabel = res.part ? '(' + res.part + ')' : '';
+        var verdictClass = awarded ? 'pass' : 'fail';
+        var verdictText = awarded ? '✅ Mark Awarded' : '❌ Mark Not Awarded';
+
+        var html = '<div class="reasoning-detail-panel">';
+        html += '<button class="rdp-close" onclick="closeReasoningPanel(' + idx + ')" title="Close">&times;</button>';
+        html += '<div class="rdp-header">🔍 Grader Reasoning — ' + (res.point_id || '') + ' ' + partLabel + ' ' + (res.marks || []).join('') + '</div>';
+
+        // Strategy used
+        html += '<div class="rdp-section">';
+        html += '<span class="rdp-label">Strategy:</span> ';
+        html += '<span class="rdp-strategy">' + (STRATEGY_LABELS[details.type] || details.type || 'none') + '</span>';
+        html += '</div>';
+
+        // What was required vs. what was found
+        html += '<div class="rdp-section">';
+        if (details.required && details.required.length) {
+          html += '<span class="rdp-label">Required:</span> ' + details.required.map(function(v) { return '<code>' + escapeHtml_(String(v)) + '</code>'; }).join(', ') + '<br>';
+        }
+        if (details.found && details.found.length) {
+          html += '<span class="rdp-label">Found:</span> <span class="rdp-found">' + details.found.map(function(v) { return '<code>' + escapeHtml_(String(v)) + '</code>'; }).join(', ') + '</span><br>';
+        }
+        if (details.missing && details.missing.length) {
+          html += '<span class="rdp-label">Missing:</span> <span class="rdp-missing">' + details.missing.map(function(v) { return '<code>' + escapeHtml_(String(v)) + '</code>'; }).join(', ') + '</span><br>';
+        }
+        if (details.student_numbers && details.student_numbers.length) {
+          var nums = details.student_numbers.slice(0, 30).map(function(v) { return '<code>' + escapeHtml_(String(v)) + '</code>'; }).join(', ');
+          if (details.student_numbers.length > 30) nums += ' … (' + details.student_numbers.length + ' total)';
+          html += '<span class="rdp-label">Student #s:</span> ' + nums + '<br>';
+        }
+        if (details.partRestricted) {
+          html += '<span class="rdp-label">Scope:</span> Search restricted to part ' + partLabel + ' text only<br>';
+        }
+        html += '</div>';
+
+        // Special badges / implication / method selection
+        var extras = [];
+        if (res.awardedByImplication) {
+          extras.push('🔗 <strong>Awarded by implication</strong> — a correct later answer implies this earlier step was done.');
+        }
+        if (res.isImplied && !res.awardedByImplication) {
+          extras.push('🔗 This is an <strong>implied mark</strong> (parenthesized in the mark scheme). It can be awarded automatically if subsequent work is correct.');
+        }
+        if (details.impliedReason) {
+          extras.push('📎 <strong>Implication trigger:</strong> ' + escapeHtml_(details.impliedReason));
+        }
+        if (res.excludedByMethod) {
+          extras.push('🔀 This mark belongs to <strong>' + (res.branch || '').replace('METHOD', 'Method ') + '</strong>, which was <em>not selected</em>. The grader selected <strong>' + (res.selectedMethod || '').replace('METHOD', 'Method ') + '</strong> as the best-scoring method.');
+        } else if (res.branch && res.branch.startsWith('METHOD')) {
+          extras.push('🔀 This mark belongs to <strong>' + res.branch.replace('METHOD', 'Method ') + '</strong>, which was <em>selected</em> as the best-scoring method.');
+        }
+        if (details.learnedRule) {
+          extras.push('📖 <strong>Learned rule applied:</strong> ' + escapeHtml_(details.learnedRule));
+        }
+        if (extras.length) {
+          html += '<div class="rdp-section">';
+          html += extras.join('<br>');
+          html += '</div>';
+        }
+
+        // Final verdict
+        html += '<div class="rdp-verdict ' + verdictClass + '">' + verdictText;
+        if (awarded && details.type === 'numeric') {
+          html += ' <span style="font-weight:normal; font-size:11px;">(Note: Strategy 3 searches globally — verify the found value is from the correct part)</span>';
+        }
+        html += '</div>';
+
+        html += '</div>';
+
+        panelRow.querySelector('td').innerHTML = html;
+        panelRow.style.display = 'table-row';
+        panelRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      function closeReasoningPanel(idx) {
+        var panelRow = document.getElementById('rdp-row-' + idx);
+        if (panelRow) {
+          panelRow.style.display = 'none';
+          panelRow.querySelector('td').innerHTML = '';
+        }
+      }
+
+      /**
+       * Request an AI-generated suggestion for this grading run.
+       * Sends grading results to server, which calls Claude API.
+       * Displays the suggestion in the ai-suggestion-container div.
+       */
+      function requestAiSuggestion_(result) {
+        var container = document.getElementById('ai-suggestion-container');
+        if (!container) return;
+
+        // Show loading state
+        container.innerHTML = '<div class="ai-suggestion-banner">' +
+          '<div class="ai-header">💡 AI Suggestion</div>' +
+          '<div class="ai-loading">Analyzing grading results…</div>' +
+          '</div>';
+
+        // Build a concise summary for the AI
+        var summary = {
+          questionCode: result.questionCode || '',
+          score: result.score,
+          results: (result.results || []).map(function(r) {
+            return {
+              point_id: r.point_id,
+              part: r.part,
+              marks: r.marks,
+              requirement: r.requirement,
+              awarded: r.awarded,
+              strategy: r.details ? r.details.type : 'none',
+              found: r.details ? r.details.found : [],
+              missing: r.details ? r.details.missing : [],
+              isImplied: r.isImplied || false,
+              awardedByImplication: r.awardedByImplication || false,
+              excludedByMethod: r.excludedByMethod || false
+            };
+          }),
+          ocrVerification: result.ocrVerification ? {
+            correctionsMade: result.ocrVerification.correctionsMade || 0,
+            confidence: result.ocrVerification.confidence
+          } : null
+        };
+
+        google.script.run
+          .withSuccessHandler(function(raw) {
+            try {
+              var suggestion = typeof raw === 'string' ? JSON.parse(raw) : raw;
+              if (suggestion && suggestion.text) {
+                container.innerHTML = '<div class="ai-suggestion-banner">' +
+                  '<div class="ai-header">💡 AI Suggestion</div>' +
+                  '<div class="ai-body">' + escapeHtml_(suggestion.text) + '</div>' +
+                  '</div>';
+              } else if (suggestion && suggestion.error) {
+                container.innerHTML = '<div class="ai-suggestion-banner">' +
+                  '<div class="ai-header">💡 AI Suggestion</div>' +
+                  '<div class="ai-body" style="color:#999;">' + escapeHtml_(suggestion.error) + '</div>' +
+                  '</div>';
+              } else {
+                container.innerHTML = '';
+              }
+            } catch (e) {
+              console.warn('AI suggestion parse error:', e);
+              container.innerHTML = '';
+            }
+          })
+          .withFailureHandler(function(err) {
+            console.warn('AI suggestion error:', err);
+            container.innerHTML = '<div class="ai-suggestion-banner">' +
+              '<div class="ai-header">💡 AI Suggestion</div>' +
+              '<div class="ai-body" style="color:#999;">Could not generate suggestion. (AI service may not be configured yet.)</div>' +
+              '</div>';
+          })
+          .getAiSuggestion(JSON.stringify(summary));
+      }
+
+      /**
+       * Open the correction detail panel below a marking point row.
+       * Shows grader reasoning and asks teacher WHY they disagree.
+       */
+      function openCorrectionPanel(idx) {
+        if (!window.currentGradingResult || !window.currentGradingResult.results) return;
+
+        // Close any already-open panel
+        var existing = document.querySelector('.correction-panel-row[style*="table-row"]');
+        if (existing) {
+          existing.style.display = 'none';
+          existing.querySelector('td').innerHTML = '';
+        }
+
+        var res = window.currentGradingResult.results[idx];
+        var panelRow = document.getElementById('cdp-row-' + idx);
+        if (!panelRow) return;
+
+        var willAward = !res.awarded;
+        var actionVerb = willAward ? 'Award' : 'Remove';
+        var actionEmoji = willAward ? '✅' : '❌';
+
+        // Build the panel content
+        var html = '<div class="correction-detail-panel">';
+        html += '<div class="cdp-header">' + actionEmoji + ' ' + actionVerb + ' mark ' + res.point_id + ' — ' + (res.marks || []).join('') + '</div>';
+
+        // Grader reasoning section
+        html += '<div class="cdp-reasoning">';
+        html += '<strong>🤖 Grader\'s reasoning:</strong><br>';
+        html += buildReasoningHtml_(res.details);
+        if (res.awardedByImplication) {
+          html += '<br><em>This mark was awarded by <strong>implication</strong> (correct subsequent answer implies this step).</em>';
+        }
+        if (res.excludedByMethod) {
+          html += '<br><em>This mark is from <strong>' + (res.branch || '').replace('METHOD', 'Method ') + '</strong>, which was not selected. Best: ' + (res.selectedMethod || '').replace('METHOD', 'Method ') + '.</em>';
+        }
+        html += '</div>';
+
+        // Reason dropdown
+        html += '<label>Why is the grader wrong?</label>';
+        html += '<select id="cdp-reason-' + idx + '">';
+        CORRECTION_REASONS.forEach(function(r) {
+          html += '<option value="' + r.value + '">' + r.label + '</option>';
+        });
+        html += '</select>';
+
+        // Notes field
+        html += '<label style="margin-top:8px;">Notes <span style="font-weight:normal;color:#999;">(optional — be specific, this trains the AI)</span></label>';
+        html += '<textarea id="cdp-notes-' + idx + '" placeholder="e.g. The 1003 is from part (b), not part (ai). The grader should not search globally."></textarea>';
+
+        // Action buttons
+        html += '<div class="cdp-actions">';
+        html += '<button class="cdp-confirm" onclick="confirmCorrection(' + idx + ')">' + actionEmoji + ' ' + actionVerb + ' Mark</button>';
+        html += '<button class="cdp-cancel" onclick="cancelCorrection(' + idx + ')">Cancel</button>';
+        html += '</div>';
+        html += '</div>';
+
+        panelRow.querySelector('td').innerHTML = html;
+        panelRow.style.display = 'table-row';
+
+        // Scroll into view
+        panelRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      /**
+       * Confirm a correction: apply the toggle, store structured feedback, close panel.
+       */
+      function confirmCorrection(idx) {
+        if (!window.currentGradingResult || !window.currentGradingResult.results) return;
+
+        var res = window.currentGradingResult.results[idx];
+        var originalAwarded = res.awarded;
+        var newAwarded = !originalAwarded;
+
+        // Collect structured feedback
+        var reasonSelect = document.getElementById('cdp-reason-' + idx);
+        var notesInput = document.getElementById('cdp-notes-' + idx);
+        var reason = reasonSelect ? reasonSelect.value : '';
+        var notes = notesInput ? notesInput.value.trim() : '';
+
+        // Track the correction with structured data
+        window.gradingCorrections[idx] = {
+          pointId: res.point_id,
+          part: res.part,
+          branch: res.branch || '',
+          originalDecision: originalAwarded,
+          correctedDecision: newAwarded,
+          requirement: res.requirement,
+          graderStrategy: (res.details || {}).type || 'unknown',
+          graderScore: res.score || 0,
+          reason: reason,
+          notes: notes
+        };
+
+        // Update the result
+        res.awarded = newAwarded;
+
+        // Update the display row
+        var row = document.querySelector('tr[data-point-idx="' + idx + '"]');
+        if (row) {
+          row.classList.remove('awarded', 'not-awarded');
+          row.classList.add(newAwarded ? 'awarded' : 'not-awarded', 'corrected');
+
+          var statusCell = row.cells[0];
+          statusCell.innerHTML = statusCell.innerHTML.replace(/[✅❌]/, newAwarded ? '✅' : '❌');
+
+          var btn = row.querySelector('.correction-btn');
+          if (btn) {
+            btn.className = 'correction-btn ' + (newAwarded ? 'btn-deny' : 'btn-award');
+            btn.innerHTML = newAwarded ? '✗' : '✓';
+            btn.title = newAwarded ? 'Remove this mark' : 'Award this mark';
+          }
+        }
+
+        // Close the panel
+        var panelRow = document.getElementById('cdp-row-' + idx);
+        if (panelRow) {
+          panelRow.style.display = 'none';
+          panelRow.querySelector('td').innerHTML = '';
+        }
+
+        // Recalculate score
+        recalculateScore();
+
+        // Enable save button
+        var saveBtn = document.getElementById('save-corrections-btn');
+        if (saveBtn) saveBtn.disabled = Object.keys(window.gradingCorrections).length === 0;
+
+        var reasonLabel = reason ? (' [' + reason + ']') : '';
+        log('✏️ Mark ' + (idx + 1) + ' (' + res.point_id + ') ' + (newAwarded ? 'awarded' : 'removed') + reasonLabel, 'warn');
+      }
+
+      /**
+       * Cancel a correction: close the panel without changing anything.
+       */
+      function cancelCorrection(idx) {
+        var panelRow = document.getElementById('cdp-row-' + idx);
+        if (panelRow) {
+          panelRow.style.display = 'none';
+          panelRow.querySelector('td').innerHTML = '';
+        }
+      }
+      
+      /**
+       * Recalculate the displayed score after corrections.
+       */
+      function recalculateScore() {
+        if (!window.currentGradingResult) return;
+        
+        let awarded = 0;
+        let possible = 0;
+        
+        window.currentGradingResult.results.forEach(res => {
+          const marks = res.marks || [];
+          marks.forEach(m => {
+            const match = m.match(/[AM](\d*)/);
+            const count = match && match[1] ? parseInt(match[1]) : 1;
+            possible += count;
+            if (res.awarded) awarded += count;
+          });
+        });
+        
+        const pct = possible > 0 ? Math.round((awarded / possible) * 100) : 0;
+        
+        // Update display
+        const scoreDisplay = document.getElementById('grading-score-display');
+        scoreDisplay.textContent = `${awarded} / ${possible}`;
+        scoreDisplay.className = 'score-big ' + (pct >= 70 ? 'score-high' : pct >= 50 ? 'score-medium' : 'score-low');
+        document.getElementById('grading-percentage').textContent = `${pct}%`;
+      }
+      
+      /**
+       * Save all corrections to the database for learning.
+       */
+      function saveGradingCorrections() {
+        const corrections = Object.values(window.gradingCorrections);
+        if (corrections.length === 0) {
+          alert('No corrections to save.');
+          return;
+        }
+        
+        var questionCode = window.currentGradingResult.questionCode;
+        var studentText = currentStudentOcrData ? (currentStudentOcrData.cleanedOcrText || currentStudentOcrData.ocrText || '') : '';
+        
+        var saved = 0;
+        var failed = 0;
+        
+        corrections.forEach(function(corr, i) {
+          // Combine the structured reason + notes into a rich teacherNotes string
+          var teacherNotes = '';
+          if (corr.reason) teacherNotes += '[' + corr.reason + '] ';
+          if (corr.notes) teacherNotes += corr.notes;
+          if (corr.graderStrategy) teacherNotes += ' {strategy:' + corr.graderStrategy + ',score:' + (corr.graderScore || 0).toFixed(2) + '}';
+
+          google.script.run
+            .withSuccessHandler(function(result) {
+              saved++;
+              if (saved + failed === corrections.length) {
+                log('✅ Saved ' + saved + ' corrections (' + failed + ' failed)', saved > 0 ? 'success' : 'error');
+                alert('Saved ' + saved + ' correction(s) for AI learning.');
+                window.gradingCorrections = {};
+                document.getElementById('save-corrections-btn').disabled = true;
+                
+                document.querySelectorAll('.grading-table tr.corrected').forEach(function(row) {
+                  row.classList.remove('corrected');
+                });
+              }
+            })
+            .withFailureHandler(function(err) {
+              failed++;
+              console.error('Failed to save correction:', err);
+              if (saved + failed === corrections.length) {
+                log('Saved ' + saved + ' corrections (' + failed + ' failed)', failed > 0 ? 'warn' : 'success');
+              }
+            })
+            .saveGradingCorrection(
+              questionCode,
+              corr.pointId,
+              corr.originalDecision,
+              corr.correctedDecision,
+              studentText,
+              corr.requirement,
+              teacherNotes
+            );
+        });
+      }
+      
+      /**
+       * Open the rules review panel.
+       */
+      function reviewLearnedRules() {
+        log('Loading AI rules for review...', 'info');
+        
+        google.script.run
+          .withSuccessHandler(result => {
+            if (result.error) {
+              alert('Error loading rules: ' + result.error);
+              return;
+            }
+            
+            const pendingRules = result || [];
+            
+            if (pendingRules.length === 0) {
+              alert('No pending rules to review. The AI will propose new rules as you make corrections.');
+              return;
+            }
+            
+            // Build rules review modal content
+            let html = '<div class="rules-list">';
+            pendingRules.forEach((rule, idx) => {
+              html += `<div class="rule-item" data-row="${rule.rowIndex}">`;
+              html += `<div class="rule-desc">${rule.description}</div>`;
+              html += `<div class="rule-meta">`;
+              html += `Question: ${rule.questionCode || '*'} | Point: ${rule.pointId || '*'} | Type: ${rule.type} | Confidence: ${Math.round((rule.confidence || 0.5) * 100)}%`;
+              html += `</div>`;
+              html += `<div class="rule-actions">`;
+              html += `<button class="btn-approve" onclick="approveRule(${rule.rowIndex})">✓ Approve</button>`;
+              html += `<button class="btn-reject" onclick="rejectRule(${rule.rowIndex})">✗ Reject</button>`;
+              html += `</div>`;
+              html += `</div>`;
+            });
+            html += '</div>';
+            
+            // Show in a simple alert for now (could be modal later)
+            const rulesPanel = document.createElement('div');
+            rulesPanel.id = 'rules-review-panel';
+            rulesPanel.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 300; max-width: 600px; max-height: 80vh; overflow: auto;';
+            rulesPanel.innerHTML = `
+              <h3 style="margin-top: 0;">AI Rules for Review (${pendingRules.length})</h3>
+              <p style="font-size: 12px; color: #666;">These rules were proposed based on your corrections. Approve rules to let the AI use them automatically, or reject to discard.</p>
+              ${html}
+              <div style="margin-top: 15px; text-align: right;">
+                <button onclick="document.getElementById('rules-review-panel').remove();" style="background: #666; color: white;">Close</button>
+              </div>
+            `;
+            document.body.appendChild(rulesPanel);
+            
+            log(`Loaded ${pendingRules.length} pending AI rules for review`, 'success');
+          })
+          .withFailureHandler(err => {
+            alert('Failed to load rules: ' + err);
+          })
+          .getPendingRulesForReview();
+      }
+      
+      /**
+       * Approve a learned rule.
+       */
+      function approveRule(rowIndex) {
+        google.script.run
+          .withSuccessHandler(result => {
+            if (result.status === 'success') {
+              log('Rule approved and activated', 'success');
+              const item = document.querySelector(`.rule-item[data-row="${rowIndex}"]`);
+              if (item) item.style.display = 'none';
+            } else {
+              alert('Failed to approve rule: ' + result.message);
+            }
+          })
+          .withFailureHandler(err => alert('Error: ' + err))
+          .reviewRule(rowIndex, true);
+      }
+      
+      /**
+       * Reject a learned rule.
+       */
+      function rejectRule(rowIndex) {
+        google.script.run
+          .withSuccessHandler(result => {
+            if (result.status === 'success') {
+              log('Rule rejected', 'warn');
+              const item = document.querySelector(`.rule-item[data-row="${rowIndex}"]`);
+              if (item) item.style.display = 'none';
+            } else {
+              alert('Failed to reject rule: ' + result.message);
+            }
+          })
+          .withFailureHandler(err => alert('Error: ' + err))
+          .reviewRule(rowIndex, false);
+      }
+
+      // ═══════════════════════════════════════════════
+      // Rules Manager functions
+      // ═══════════════════════════════════════════════
+      var rulesManagerCache_ = { learned: null, student: null };
+
+      function openRulesManager_() {
+        document.getElementById('rules-manager-backdrop').style.display = 'block';
+        rulesManagerCache_ = { learned: null, student: null };
+        // Load whichever tab is active
+        var activeTab = document.querySelector('.rules-mgr-tab.active');
+        loadRulesTab_(activeTab ? activeTab.dataset.tab : 'learned');
+      }
+
+      function loadRulesTab_(tab) {
+        var body = document.getElementById('rules-mgr-body');
+        var footer = document.getElementById('rules-mgr-footer');
+        body.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">Loading rules…</div>';
+        footer.textContent = '';
+
+        if (tab === 'learned') {
+          google.script.run
+            .withSuccessHandler(function(raw) { renderRulesTable_('learned', raw); })
+            .withFailureHandler(function(err) { body.innerHTML = '<div style="color:red;padding:20px;">Error: ' + err.message + '</div>'; })
+            .getAllLearnedRules();
+        } else {
+          google.script.run
+            .withSuccessHandler(function(raw) { renderRulesTable_('student', raw); })
+            .withFailureHandler(function(err) { body.innerHTML = '<div style="color:red;padding:20px;">Error: ' + err.message + '</div>'; })
+            .getAllStudentRules(null);
+        }
+      }
+
+      function renderRulesTable_(type, raw) {
+        var data = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+        rulesManagerCache_[type] = data.rules;
+        var body = document.getElementById('rules-mgr-body');
+        var footer = document.getElementById('rules-mgr-footer');
+
+        if (!data.rules || data.rules.length === 0) {
+          body.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">No rules found.</div>';
+          footer.textContent = '0 rules';
+          return;
+        }
+
+        var isStudent = (type === 'student');
+        var html = '<table class="rules-mgr-table"><thead><tr>';
+        if (isStudent) html += '<th>Student</th>';
+        html += '<th>Pattern</th><th>Replacement</th><th>Freq</th><th>Last Seen</th>';
+        if (isStudent) html += '<th>Question</th>';
+        html += '<th style="width:100px;">Actions</th></tr></thead><tbody>';
+
+        data.rules.forEach(function(r) {
+          html += '<tr data-row="' + r.row + '" data-type="' + type + '">';
+          if (isStudent) html += '<td>' + escapeHtml_(r.studentId) + '</td>';
+          html += '<td class="rm-pattern" title="' + escapeHtml_(r.pattern) + '">' + escapeHtml_(r.pattern) + '</td>';
+          html += '<td class="rm-replacement" title="' + escapeHtml_(r.replacement) + '">' + escapeHtml_(r.replacement) + '</td>';
+          html += '<td>' + r.frequency + '</td>';
+          html += '<td style="font-size:11px;">' + (r.lastSeen ? r.lastSeen.substring(0, 10) : '-') + '</td>';
+          if (isStudent) html += '<td style="font-size:11px;">' + escapeHtml_(r.questionCode || '') + '</td>';
+          html += '<td>'
+            + '<button class="rm-btn rm-btn-edit" onclick="rmStartEdit_(this)" title="Edit rule">✏️</button> '
+            + '<button class="rm-btn rm-btn-delete" onclick="rmDeleteRule_(this)" title="Delete rule">🗑️</button>'
+            + '</td>';
+          html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        body.innerHTML = html;
+        footer.textContent = data.rules.length + ' rule(s) total' + (data.error ? ' — ⚠️ ' + data.error : '');
+      }
+
+      function rmStartEdit_(btn) {
+        var tr = btn.closest('tr');
+        var type = tr.dataset.type;
+        var isStudent = (type === 'student');
+        var patternTd = tr.querySelector('.rm-pattern');
+        var replaceTd = tr.querySelector('.rm-replacement');
+        var actionsTd = tr.querySelector('td:last-child');
+        var oldPattern = patternTd.title;
+        var oldReplace = replaceTd.title;
+
+        patternTd.innerHTML = '<input class="rm-edit" value="' + escapeHtml_(oldPattern) + '">';
+        replaceTd.innerHTML = '<input class="rm-edit" value="' + escapeHtml_(oldReplace) + '">';
+        actionsTd.innerHTML =
+          '<button class="rm-btn rm-btn-save" onclick="rmSaveEdit_(this)" title="Save changes">💾</button> '
+          + '<button class="rm-btn rm-btn-cancel" onclick="rmCancelEdit_(this, \'' + escapeHtml_(oldPattern).replace(/'/g, "\\'") + '\', \'' + escapeHtml_(oldReplace).replace(/'/g, "\\'") + '\')" title="Cancel edit">✖</button>';
+      }
+
+      function rmCancelEdit_(btn, oldPattern, oldReplace) {
+        var tr = btn.closest('tr');
+        tr.querySelector('.rm-pattern').innerHTML = oldPattern;
+        tr.querySelector('.rm-pattern').title = oldPattern;
+        tr.querySelector('.rm-replacement').innerHTML = oldReplace;
+        tr.querySelector('.rm-replacement').title = oldReplace;
+        tr.querySelector('td:last-child').innerHTML =
+          '<button class="rm-btn rm-btn-edit" onclick="rmStartEdit_(this)">✏️</button> '
+          + '<button class="rm-btn rm-btn-delete" onclick="rmDeleteRule_(this)">🗑️</button>';
+      }
+
+      function rmSaveEdit_(btn) {
+        var tr = btn.closest('tr');
+        var row = parseInt(tr.dataset.row);
+        var type = tr.dataset.type;
+        var newPattern = tr.querySelector('.rm-pattern input').value;
+        var newReplace = tr.querySelector('.rm-replacement input').value;
+
+        btn.disabled = true;
+        btn.textContent = '⏳';
+
+        var handler = function(raw) {
+          var result = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+          if (result.success) {
+            tr.querySelector('.rm-pattern').innerHTML = escapeHtml_(newPattern);
+            tr.querySelector('.rm-pattern').title = newPattern;
+            tr.querySelector('.rm-replacement').innerHTML = escapeHtml_(newReplace);
+            tr.querySelector('.rm-replacement').title = newReplace;
+            tr.querySelector('td:last-child').innerHTML =
+              '<button class="rm-btn rm-btn-edit" onclick="rmStartEdit_(this)">✏️</button> '
+              + '<button class="rm-btn rm-btn-delete" onclick="rmDeleteRule_(this)">🗑️</button>';
+            log('✅ Rule updated: row ' + row, 'success');
+          } else {
+            alert('Update failed: ' + (result.error || 'unknown'));
+            btn.disabled = false;
+            btn.textContent = '💾';
+          }
+        };
+        var fail = function(err) { alert('Error: ' + err.message); btn.disabled = false; btn.textContent = '💾'; };
+
+        if (type === 'student') {
+          google.script.run.withSuccessHandler(handler).withFailureHandler(fail).updateStudentRule(row, newPattern, newReplace);
+        } else {
+          google.script.run.withSuccessHandler(handler).withFailureHandler(fail).updateLearnedRule(row, newPattern, newReplace);
+        }
+      }
+
+      function rmDeleteRule_(btn) {
+        var tr = btn.closest('tr');
+        var row = parseInt(tr.dataset.row);
+        var type = tr.dataset.type;
+        var pattern = tr.querySelector('.rm-pattern').title || tr.querySelector('.rm-pattern').textContent;
+
+        if (!confirm('Delete rule "' + pattern.substring(0, 50) + '"?')) return;
+
+        btn.disabled = true;
+        btn.textContent = '⏳';
+
+        var handler = function(raw) {
+          var result = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+          if (result.success) {
+            tr.style.opacity = '0.3';
+            tr.style.textDecoration = 'line-through';
+            tr.querySelector('td:last-child').innerHTML = '<span style="color:#999;">Deleted</span>';
+            log('🗑️ Rule deleted: "' + result.deletedPattern + '"', 'warn');
+          } else {
+            alert('Delete failed: ' + (result.error || 'unknown'));
+            btn.disabled = false;
+            btn.textContent = '🗑️';
+          }
+        };
+        var fail = function(err) { alert('Error: ' + err.message); btn.disabled = false; btn.textContent = '🗑️'; };
+
+        if (type === 'student') {
+          google.script.run.withSuccessHandler(handler).withFailureHandler(fail).deleteStudentRule(row);
+        } else {
+          google.script.run.withSuccessHandler(handler).withFailureHandler(fail).deleteLearnedRule(row);
+        }
       }
     </script>
   </body>

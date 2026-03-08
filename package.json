@@ -9,6 +9,11 @@
     "deploy": "clasp deploy",
     "gas:run": "node scripts/gas_run_api.js",
     "test:health": "npm run gas:run -- apiHealthCheck",
-    "test:grade": "npm run gas:run -- runSingleGradeTest"
+    "test:grade": "npm run gas:run -- runSingleGradeTest",
+    "logs:list": "npm run gas:run -- listLogFiles '[10]'",
+    "logs:fetch": "npm run gas:run -- fetchLogFile"
+  },
+  "devDependencies": {
+    "dotenv": "^17.3.1"
   }
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('dotenv').config();
 /*
  * Run an Apps Script function from the terminal via Execution API.
  *

@@ -3,5 +3,9 @@
 *.save
 PROJECT_OVERVIEW.md
 
-
 clasp-oauth.json
+.env
+
+# Log files fetched from GAS (local working copies)
+logs/*.log
+node_modules/

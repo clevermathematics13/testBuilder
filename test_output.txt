@@ -1,0 +1,35 @@
+
+> gas-standalone-ui@1.0.0 test:grade
+> npm run gas:run -- runSingleGradeTest
+
+
+> gas-standalone-ui@1.0.0 gas:run
+> node scripts/gas_run_api.js runSingleGradeTest
+
+[dotenv@17.3.1] injecting env (1) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+Script execution error: AuthRequiredError
+Details: [
+  {
+    "@type": "type.googleapis.com/google.apps.script.v1.ExecutionError",
+    "scriptStackTraceElements": [
+      {
+        "function": "msaGetOrCreateQuestionFolder_",
+        "lineNumber": 96
+      },
+      {
+        "function": "_getOcrPages",
+        "lineNumber": 282
+      },
+      {
+        "function": "runOcrAndSaveToJson_",
+        "lineNumber": 82
+      },
+      {
+        "function": "runSingleGradeTest",
+        "lineNumber": 32
+      }
+    ],
+    "errorMessage": "Exception: You do not have permission to call DriveApp.getFolderById. Required permissions: (https://www.googleapis.com/auth/drive.readonly || https://www.googleapis.com/auth/drive). For more information, see https://developers.google.com/apps-script/guides/support/troubleshooting#authorization-is",
+    "errorType": "AuthRequiredError"
+  }
+]

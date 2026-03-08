@@ -51,19 +51,29 @@
         "reveal": "always",
         "panel": "dedicated"
       }
+    },
+    {
+      "label": "GAS: Pull + Commit + Push",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/gas_pull_commit_push.sh",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "GAS: Fetch Latest Log",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/fetch_latest_gas_log.sh",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
     }
-{
-  "label": "GAS: Pull + Commit + Push",
-  "type": "shell",
-  "command": "${workspaceFolder}/scripts/gas_pull_commit_push.sh",
-  "problemMatcher": [],
-  "presentation": {
-    "reveal": "always",
-    "panel": "dedicated",
-    "clear": true
-  }
-}
-
   ]
 }
 

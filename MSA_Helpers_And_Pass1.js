@@ -287,12 +287,49 @@ function msaExtractPageImagesFromDoc_(cfg, docId, folder) {
 }
 
 function msaMathpixOcrFromDriveImage_(fileId, cfg, options) {
+  var t0 = Date.now();
+  // ── Cache check: avoid re-calling Mathpix for the same file ──
+  var cacheKey = 'mathpix_ocr_' + fileId;
+  try {
+    var cached = CacheService.getScriptCache().get(cacheKey);
+    if (cached) {
+      var parsed = JSON.parse(cached);
+      msaLog_('  [OCR.cache] HIT key=' + cacheKey.substring(0, 30) + ' size=' + Math.round(cached.length / 1024) + 'KB lines=' + (parsed.line_data || []).length + ' Δ' + (Date.now() - t0) + 'ms');
+      return parsed;
+    }
+  } catch (cacheErr) {
+    msaLog_('  [OCR.cache] ERR on read: ' + cacheErr.message);
+  }
+
+  msaLog_('  [OCR.cache] MISS key=' + cacheKey.substring(0, 30) + ' → calling Mathpix API');
+
   // Fetch the image blob from Drive
+  var tBlob = Date.now();
   var file = DriveApp.getFileById(fileId);
   var blob = file.getBlob();
+  var blobSize = blob.getBytes().length;
+  msaLog_('  [OCR.blob] fetched ' + Math.round(blobSize / 1024) + 'KB mime=' + blob.getContentType() + ' Δ' + (Date.now() - tBlob) + 'ms');
   
   // Call the actual Mathpix logic defined in MSA_Mathpix.gs
-  return msaMathpixOCR_(blob, options);
+  var tApi = Date.now();
+  var result = msaMathpixOCR_(blob, options);
+  msaLog_('  [OCR.api] Mathpix returned: chars=' + (result.text || '').length + ' lines=' + (result.line_data || []).length + ' conf=' + ((result.confidence || 0) * 100).toFixed(1) + '% img=' + (result.image_width || '?') + '×' + (result.image_height || '?') + ' err=' + (result.error || 'none') + ' Δ' + (Date.now() - tApi) + 'ms');
+
+  // ── Cache the result (up to 100KB, 6-hour TTL) ──
+  try {
+    var json = JSON.stringify(result);
+    if (json.length < 100000) {
+      CacheService.getScriptCache().put(cacheKey, json, 21600); // 6 hours
+      msaLog_('  [OCR.cache] WRITE ' + Math.round(json.length / 1024) + 'KB TTL=6h');
+    } else {
+      msaLog_('  [OCR.cache] SKIP too large ' + Math.round(json.length / 1024) + 'KB (limit=100KB)');
+    }
+  } catch (cacheWriteErr) {
+    msaWarn_('  [OCR.cache] WRITE fail: ' + cacheWriteErr.message);
+  }
+
+  msaLog_('  [OCR] totalΔ' + (Date.now() - t0) + 'ms');
+  return result;
 }
 
 function msaBuildCombinedOcr_(cfg, docId, folder, ocrPages) {

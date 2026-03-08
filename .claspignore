@@ -13,3 +13,12 @@
 !SRG_Grader.js
 !MSA_Mathpix.js
 !MSA_DocImages.js
+!ExamUI.html
+!ExamUI_Backend.js
+!StudentWorkOCR.js
+!ExamSystem_Integration.js
+!Launcher.js
+!GradingAI.js
+!OCR_Verify.js
+!OCR_Learn.js
+!StudentOCR_Profile.js

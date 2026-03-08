@@ -110,26 +110,110 @@ function gradeStudentResponse(studentWorkImageId, markschemeDocId, markschemePoi
 }
 
 /**
+ * Segment student text by part markers and return only the section
+ * that belongs to the requested part.  This prevents numbers from
+ * part (b) leaking into the match for part (a)/(ai)/(aii) etc.
+ *
+ * Algorithm:
+ *   1. Scan for main-part markers: (a), (b), (c), …
+ *   2. For the requested part, return lines from that marker to the next.
+ *   3. If no markers found, or the target part is missing, return the
+ *      full text so the caller degrades gracefully.
+ *
+ * @param {string} studentText  Full student OCR text
+ * @param {string} partLabel    Part code from mark scheme, e.g. 'ai', 'aii', 'b'
+ * @returns {string} The segment of student text for that part
+ */
+function getTextForPart_(studentText, partLabel) {
+  if (!partLabel || !studentText) return studentText;
+
+  var mainPart = partLabel.charAt(0).toLowerCase(); // 'a', 'b', 'c'
+  var lines = studentText.split('\n');
+
+  // Scan for main-part markers: (a), (b), (c), etc.
+  // We look for lines that contain a part marker at the start or after whitespace.
+  // Matches: "(a)", "(a)(i)", "(b)", but NOT bare sub-parts like "(i)" without main.
+  var partBoundaries = [];  // { part: 'a', lineIdx: 0 }, ...
+
+  for (var i = 0; i < lines.length; i++) {
+    var m = lines[i].match(/\(\s*([a-z])\s*\)/i);
+    if (m) {
+      var part = m[1].toLowerCase();
+      // Only record the FIRST occurrence of each main part
+      var alreadySeen = partBoundaries.some(function(b) { return b.part === part; });
+      if (!alreadySeen) {
+        partBoundaries.push({ part: part, lineIdx: i });
+      }
+    }
+  }
+
+  // No part markers found → return full text (backward-compatible)
+  if (partBoundaries.length === 0) return studentText;
+
+  // Find the target main part
+  var targetIdx = -1;
+  for (var j = 0; j < partBoundaries.length; j++) {
+    if (partBoundaries[j].part === mainPart) { targetIdx = j; break; }
+  }
+  if (targetIdx === -1) return studentText;  // target part not found
+
+  var startLine = partBoundaries[targetIdx].lineIdx;
+  var endLine = lines.length;
+
+  // End at the next main part boundary
+  if (targetIdx + 1 < partBoundaries.length) {
+    endLine = partBoundaries[targetIdx + 1].lineIdx;
+  }
+
+  return lines.slice(startLine, endLine).join('\n');
+}
+
+/**
  * The core matching engine. Compares student text to a markscheme requirement.
  * This is a simple keyword-based approach and can be improved over time.
  * @param {string} studentOcrText The full OCR text from the student's work.
  * @param {string} requirementText The requirement text from a single markscheme point.
+ * @param {object} options Additional options like {isImplied: true, part: 'ai', dependsOn: [...], allResults: [...]}
  * @returns {{awarded: boolean, score: number}}
  */
-function srgMatchRequirement_(studentOcrText, requirementText) {
+function srgMatchRequirement_(studentOcrText, requirementText, options) {
+  options = options || {};
   const getNumbers = (text) => (String(text || "").match(/-?\d+(\.\d+)?/g) || []);
 
+  // --- STRATEGY 0: Sigma / Summation Equivalence ---
+  // IB mark schemes often say "∑(expression) or equivalent".
+  // Students may use a different index variable, different bounds, or
+  // a simplified integrand that is algebraically identical.
+  // We evaluate both sigma expressions numerically and compare.
+  if (/sum|\\sum|∑|Σ/i.test(requirementText) && /sum|\\sum|∑|Σ/i.test(studentOcrText)) {
+    var sigmaResult = srgMatchSigmaExpressions_(studentOcrText, requirementText);
+    if (sigmaResult && sigmaResult.awarded) {
+      return sigmaResult;
+    }
+  }
+
   // --- STRATEGY 1: Exact Assignment Match (e.g., "n=27") ---
-  // This is high confidence and is checked against the whole document.
+  // Part-aware: search within the relevant part segment, not globally.
   const normalizedRequirement = String(requirementText || "").replace(/[\\()]/g, "").trim();
   const assignmentMatch = normalizedRequirement.match(/\b([a-z])\s*=\s*(-?\d+(\.\d+)?)\b/i);
   if (assignmentMatch) {
     const varName = assignmentMatch[1];
     const reqValue = assignmentMatch[2];
     const studentAssignmentRegex = new RegExp(`\\b${varName}\\s*=\\s*${reqValue}\\b`, "i");
-    const normalizedStudentText = String(studentOcrText || "").replace(/[\\()]/g, "");
+
+    // Restrict search to the relevant part segment
+    var s1SearchText = studentOcrText;
+    var s1PartRestricted = false;
+    if (options.part) {
+      var partText = getTextForPart_(studentOcrText, options.part);
+      if (partText !== studentOcrText) {
+        s1SearchText = partText;
+        s1PartRestricted = true;
+      }
+    }
+    const normalizedStudentText = String(s1SearchText || "").replace(/[\\()]/g, "");
     if (studentAssignmentRegex.test(normalizedStudentText)) {
-      return { awarded: true, score: 1.0, details: { type: 'assignment', required: `${varName}=${reqValue}`, found: `${varName}=${reqValue}`, missing: [] } };
+      return { awarded: true, score: 1.0, details: { type: 'assignment', required: `${varName}=${reqValue}`, found: `${varName}=${reqValue}`, missing: [], partRestricted: s1PartRestricted } };
     }
   }
 
@@ -156,19 +240,57 @@ function srgMatchRequirement_(studentOcrText, requirementText) {
     }
   }
 
-  // --- STRATEGY 3: Global Numeric Match (Fallback) ---
-  // This is the broad search, now used as a last resort for numeric checks.
+  // --- STRATEGY 3: Part-Aware Numeric Match ---
+  // If we know which part this requirement belongs to, restrict the
+  // numeric search to that part's segment of the student text.
+  // This prevents numbers from part (b) leaking into part (a)'s match.
   if (requirementNumbers.length > 0) {
-    const studentNumbers = new Set(getNumbers(studentOcrText));
+    var s3SearchText = studentOcrText;
+    var s3PartRestricted = false;
+    if (options.part) {
+      var s3PartText = getTextForPart_(studentOcrText, options.part);
+      if (s3PartText !== studentOcrText) {
+        s3SearchText = s3PartText;
+        s3PartRestricted = true;
+      }
+    }
+
+    const studentNumbers = new Set(getNumbers(s3SearchText));
     const foundNumbers = requirementNumbers.filter(num => studentNumbers.has(num));
     const numberMatchRatio = foundNumbers.length / requirementNumbers.length;
 
-    // If all required numbers are found, it's a very strong match.
+    // If all required numbers are found in the correct part → strong match.
     if (numberMatchRatio === 1.0) {
-      return { awarded: true, score: 1.0, details: { type: 'numeric', required: requirementNumbers, found: foundNumbers, missing: [], student_numbers: Array.from(studentNumbers) } };
+      return { awarded: true, score: 1.0, details: { type: 'numeric', required: requirementNumbers, found: foundNumbers, missing: [], student_numbers: Array.from(studentNumbers), partRestricted: s3PartRestricted } };
     }
-    // If some but not all numbers are found, it's a partial match.
-    // We can use this score directly.
+
+    // If part-restricted search missed numbers, check if they exist globally.
+    // If found globally but NOT in the correct part → do NOT award (cross-part leak).
+    if (s3PartRestricted && numberMatchRatio < 1.0) {
+      var globalStudentNumbers = new Set(getNumbers(studentOcrText));
+      var globalFoundNumbers = requirementNumbers.filter(num => globalStudentNumbers.has(num));
+      var globalRatio = globalFoundNumbers.length / requirementNumbers.length;
+
+      if (globalRatio > numberMatchRatio) {
+        return {
+          awarded: false,
+          score: globalRatio * 0.2,  // heavily penalized — numbers are in the wrong part
+          details: {
+            type: 'numeric',
+            required: requirementNumbers,
+            found: foundNumbers,
+            missing: requirementNumbers.filter(num => !studentNumbers.has(num)),
+            student_numbers: Array.from(studentNumbers),
+            globalFound: globalFoundNumbers,
+            partRestricted: true,
+            crossPartLeak: true,
+            note: 'Numbers found in text but NOT in part (' + (options.part || '') + ') segment — likely from another part'
+          }
+        };
+      }
+    }
+
+    // Normal case: partial match within the (possibly restricted) segment
     return {
       awarded: numberMatchRatio > 0.8,
       score: numberMatchRatio,
@@ -177,7 +299,8 @@ function srgMatchRequirement_(studentOcrText, requirementText) {
         required: requirementNumbers,
         found: foundNumbers,
         missing: requirementNumbers.filter(num => !studentNumbers.has(num)),
-        student_numbers: Array.from(studentNumbers)
+        student_numbers: Array.from(studentNumbers),
+        partRestricted: s3PartRestricted
       }
     };
   }
@@ -277,4 +400,299 @@ function srgCalculateAwardedScore_(results) {
     total: totalAwarded,
     breakdown: breakdown
   };
+}
+
+
+/* ═══════════════════════════════════════════════════════
+ * SIGMA EXPRESSION EQUIVALENCE CHECKER
+ *
+ * Parses sigma/summation expressions from both mark-scheme and student
+ * text, evaluates them numerically, and compares the results.
+ *
+ * Handles common IB forms:
+ *   ∑_{n=1}^{27}(7+7n)          mark scheme
+ *   ∑_{i=2}^{28} 7i             student (index-shifted equivalent)
+ *   \sum_{k=1}^{27}(7+7k)       LaTeX variant
+ *   ∑7i  with limits i=2..28    OCR variant
+ * ═══════════════════════════════════════════════════════ */
+
+/**
+ * Try to match a sigma expression in the student text against one
+ * in the requirement text by evaluating both numerically.
+ *
+ * @param {string} studentText  Full student OCR text
+ * @param {string} reqText      Requirement text from mark scheme
+ * @returns {object|null}  { awarded, score, details } or null if
+ *   we can't parse a sigma expression from either side.
+ */
+function srgMatchSigmaExpressions_(studentText, reqText) {
+  // 1. Parse sigma expression(s) from the requirement
+  var reqSigma = parseSigmaExpression_(reqText);
+  if (!reqSigma) return null;
+
+  // 2. Parse sigma expression(s) from the student text
+  //    The student may have written it on one line near the part marker,
+  //    or spread across the whole text.  Try the full text.
+  var stuSigma = parseSigmaExpression_(studentText);
+  if (!stuSigma) return null;
+
+  // 3. Evaluate both expressions numerically
+  var reqValue = evaluateSigma_(reqSigma);
+  var stuValue = evaluateSigma_(stuSigma);
+
+  if (reqValue === null || stuValue === null) return null;
+
+  msaLog_('[SIGMA MATCH] Requirement: ∑(' + reqSigma.body + '), ' +
+    reqSigma.variable + '=' + reqSigma.lower + '..' + reqSigma.upper +
+    ' → ' + reqValue);
+  msaLog_('[SIGMA MATCH] Student:     ∑(' + stuSigma.body + '), ' +
+    stuSigma.variable + '=' + stuSigma.lower + '..' + stuSigma.upper +
+    ' → ' + stuValue);
+
+  // 4. Compare
+  var tol = Math.abs(reqValue) * 1e-9 + 1e-9; // relative + absolute tolerance
+  if (Math.abs(reqValue - stuValue) <= tol) {
+    return {
+      awarded: true,
+      score: 1.0,
+      details: {
+        type: 'sigma_equivalence',
+        required: reqSigma,
+        found: stuSigma,
+        reqValue: reqValue,
+        stuValue: stuValue,
+        missing: []
+      }
+    };
+  }
+
+  // Values don't match — not equivalent
+  msaLog_('[SIGMA MATCH] Values differ: ' + reqValue + ' ≠ ' + stuValue);
+  return null; // fall through to other strategies
+}
+
+/**
+ * Parse a sigma expression from text.
+ * Handles many OCR / LaTeX variants:
+ *
+ *   ∑_{n=1}^{27}(7+7n)     →  { variable:'n', lower:1, upper:27, body:'7+7*n' }
+ *   \sum_{i=2}^{28} 7i      →  { variable:'i', lower:2, upper:28, body:'7*i' }
+ *   ∑7i (with i=2..28)      →  { variable:'i', lower:2, upper:28, body:'7*i' }
+ *
+ * @param {string} text
+ * @returns {object|null}  { variable, lower, upper, body } or null
+ */
+function parseSigmaExpression_(text) {
+  if (!text) return null;
+
+  // Normalise common OCR/LaTeX sigma representations
+  var t = String(text)
+    .replace(/\\sum\\limits/g, '∑')
+    .replace(/\\sum/g, '∑')
+    .replace(/Σ/g, '∑')
+    .replace(/\\left|\\right/g, '')
+    .replace(/\\cdot/g, '*')
+    .replace(/\\times/g, '*')
+    .replace(/\\{|\\}/g, '')
+    .replace(/\s+/g, ' ');
+
+  // Pattern A:  ∑ _{var=lower}^{upper} body
+  // Covers:  ∑_{n=1}^{27}(7+7n)   and   ∑ _{i=2}^{28} 7i
+  //
+  // The body capture must be BOUNDED so it doesn't swallow the rest
+  // of a long student OCR string.  We stop at:
+  //   - " or "          (mark-scheme "or equivalent")
+  //   - \)  or  \\)     (LaTeX inline-math closer)
+  //   - \]  or  \\]     (LaTeX display-math closer)
+  //   - (a) (b) (i) etc (next part marker)
+  //   - end of string
+  var BODY_TERMINATORS = '(?:\\s+or\\s+|\\\\\\)|\\\\\\]|\\\\\\(|\\$|\\(\\s*[a-z]\\s*\\)|\\(\\s*[ivx]+\\s*\\)|$)';
+
+  var patA = new RegExp(
+    '∑\\s*_?\\s*\\{?\\s*([a-zA-Z])\\s*=\\s*(-?\\d+)\\s*\\}?\\s*\\^?\\s*\\{?\\s*(-?\\d+)\\s*\\}?\\s*' +
+    '(.+?)' + BODY_TERMINATORS, 'i'
+  );
+  var mA = t.match(patA);
+
+  if (mA) {
+    var rawBody = mA[4].trim();
+    // If the body is empty after trimming, the regex grabbed nothing useful
+    if (!rawBody) return null;
+    return {
+      variable: mA[1],
+      lower: parseInt(mA[2], 10),
+      upper: parseInt(mA[3], 10),
+      body: normaliseBody_(rawBody, mA[1])
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Normalise the body of a sigma expression into something we can evaluate.
+ *   "7+7n"    → "7+7*n"
+ *   "7i"      → "7*i"
+ *   "(7+7n)"  → "7+7*n"
+ *   "7 + 7n"  → "7+7*n"
+ *
+ * @param {string} raw   The raw body text
+ * @param {string} v     The summation variable (e.g. 'n', 'i')
+ * @returns {string}  Evaluatable expression
+ */
+function normaliseBody_(raw, v) {
+  var s = raw
+    .replace(/^\(|\)$/g, '')         // strip outer parens
+    .replace(/\s+/g, '')             // remove spaces
+    .replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, '(($1)/($2))')  // \frac{a}{b} → (a)/(b)
+    .replace(/\\left|\\right/g, '')
+    .replace(/[{}]/g, '');
+
+  // Insert multiplication before the variable where implied:
+  //   "7n"  → "7*n"    "7i" → "7*i"
+  //   but not "7+n" or "7-n" (those already have an operator)
+  var re = new RegExp('(\\d)(' + v + ')', 'g');
+  s = s.replace(re, '$1*$2');
+
+  // Also handle variable followed by digit (rare but possible)
+  re = new RegExp('(' + v + ')(\\d)', 'g');
+  s = s.replace(re, '$1*$2');
+
+  return s;
+}
+
+/**
+ * Evaluate a parsed sigma expression by iterating from lower to upper.
+ * Uses a simple safe-eval approach (no `eval`).
+ *
+ * @param {object} sigma  { variable, lower, upper, body }
+ * @returns {number|null}  The numeric sum, or null if evaluation fails.
+ */
+function evaluateSigma_(sigma) {
+  if (!sigma || sigma.lower > sigma.upper) return null;
+  // Safety: don't evaluate huge sums
+  if (sigma.upper - sigma.lower > 10000) return null;
+
+  try {
+    var total = 0;
+    for (var k = sigma.lower; k <= sigma.upper; k++) {
+      var val = evaluateSimpleExpression_(sigma.body, sigma.variable, k);
+      if (val === null) return null;
+      total += val;
+    }
+    return total;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Evaluate a simple arithmetic expression with one variable replaced by a value.
+ * Supports: +, -, *, /, parentheses, integers, decimals.
+ * Does NOT use eval() for safety.
+ *
+ * @param {string} expr   e.g. "7+7*n"
+ * @param {string} varName  e.g. "n"
+ * @param {number} varValue  e.g. 3
+ * @returns {number|null}
+ */
+function evaluateSimpleExpression_(expr, varName, varValue) {
+  // Replace the variable with its numeric value
+  var s = expr.replace(new RegExp(varName, 'g'), String(varValue));
+
+  // Tokenise
+  var tokens = tokenise_(s);
+  if (!tokens) return null;
+
+  // Parse with standard precedence: +- then */
+  var pos = { i: 0 };
+  var result = parseAddSub_(tokens, pos);
+  if (pos.i !== tokens.length) return null; // leftover tokens → bad parse
+  return result;
+}
+
+/**
+ * Tokeniser for simple arithmetic expressions.
+ * Returns array of { type: 'num'|'op'|'('|')', value }
+ */
+function tokenise_(s) {
+  var tokens = [];
+  var i = 0;
+  while (i < s.length) {
+    var ch = s[i];
+    if (ch === ' ') { i++; continue; }
+
+    // Number (including negation at start or after '(' or operator)
+    if (/\d/.test(ch) || (ch === '-' && (tokens.length === 0 ||
+        tokens[tokens.length - 1].type === 'op' ||
+        tokens[tokens.length - 1].type === '('))) {
+      var start = i;
+      if (ch === '-') i++;
+      while (i < s.length && /[\d.]/.test(s[i])) i++;
+      tokens.push({ type: 'num', value: parseFloat(s.substring(start, i)) });
+      continue;
+    }
+
+    if ('+-*/'.indexOf(ch) >= 0) {
+      tokens.push({ type: 'op', value: ch });
+      i++;
+      continue;
+    }
+
+    if (ch === '(') { tokens.push({ type: '(' }); i++; continue; }
+    if (ch === ')') { tokens.push({ type: ')' }); i++; continue; }
+
+    // Unknown character — fail
+    return null;
+  }
+  return tokens;
+}
+
+/** Parse addition / subtraction (lowest precedence) */
+function parseAddSub_(tokens, pos) {
+  var left = parseMulDiv_(tokens, pos);
+  if (left === null) return null;
+  while (pos.i < tokens.length && tokens[pos.i].type === 'op' &&
+         (tokens[pos.i].value === '+' || tokens[pos.i].value === '-')) {
+    var op = tokens[pos.i].value;
+    pos.i++;
+    var right = parseMulDiv_(tokens, pos);
+    if (right === null) return null;
+    left = op === '+' ? left + right : left - right;
+  }
+  return left;
+}
+
+/** Parse multiplication / division */
+function parseMulDiv_(tokens, pos) {
+  var left = parseAtom_(tokens, pos);
+  if (left === null) return null;
+  while (pos.i < tokens.length && tokens[pos.i].type === 'op' &&
+         (tokens[pos.i].value === '*' || tokens[pos.i].value === '/')) {
+    var op = tokens[pos.i].value;
+    pos.i++;
+    var right = parseAtom_(tokens, pos);
+    if (right === null) return null;
+    left = op === '*' ? left * right : left / right;
+  }
+  return left;
+}
+
+/** Parse an atom: number or parenthesised sub-expression */
+function parseAtom_(tokens, pos) {
+  if (pos.i >= tokens.length) return null;
+  var tok = tokens[pos.i];
+  if (tok.type === 'num') {
+    pos.i++;
+    return tok.value;
+  }
+  if (tok.type === '(') {
+    pos.i++; // skip (
+    var val = parseAddSub_(tokens, pos);
+    if (val === null) return null;
+    if (pos.i >= tokens.length || tokens[pos.i].type !== ')') return null;
+    pos.i++; // skip )
+    return val;
+  }
+  return null;
 }

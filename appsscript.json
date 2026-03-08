@@ -1,7 +1,6 @@
 {
   "timeZone": "America/Lima",
-  "dependencies": {
-  },
+  "dependencies": {},
   "oauthScopes": [
     "https://www.googleapis.com/auth/script.external_request",
     "https://www.googleapis.com/auth/drive",
@@ -10,8 +9,12 @@
     "https://www.googleapis.com/auth/documents"
   ],
   "executionApi": {
-    "access": "ANYONE"
+    "access": "MYSELF"
   },
   "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8"
+  "runtimeVersion": "V8",
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "ANYONE"
+  }
 }
